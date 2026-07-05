@@ -58,6 +58,12 @@ class AutoTuneController(
     /** Efficiency↔smoothness lean (set by the service per session; scales the margin gate + harvest). */
     var bias: AutoTdpBias = AutoTdpBias.EFFICIENT
 
+    /** Odin-only power tuning: the watt cap ([powerCeilingW]) + the prime-walled settle. Both assume the Odin's
+     *  tight chassis envelope and vendor-FLOORED prime. The SD 8 Gen 2 (Thor/RP6) has a scaling prime and a
+     *  different chassis, so the service turns this OFF there (see [appliesOdinPowerTuning]); AutoTDP then just
+     *  chases the target. The thermal ceiling stays on as a universal safety backstop regardless. */
+    var wattCapAndSettleEnabled: Boolean = true
+
     private var fpsEma = 0f
     private var jankEma = 0f
     private var jankAtLastTrim = 0f
@@ -263,32 +269,11 @@ class AutoTuneController(
 
         // Steady-render gate: a static/bursty screen (no FPS) never gets tuned or learned from.
         if (fps == null || fps <= 0f) {
-            steadyCount = 0
-            lastTrimPolicy = null
-            wBeforeTrim = null
-            bottleneck = Bottleneck.NONE
-            // Safety: never hold the prime cores offline while nothing is rendering. The unpark in
-            // handlePrimeParking is skipped by this early return, so a prime parked just before rendering
-            // stopped (an in-emulator game switch, a load screen, a pause) would otherwise stay offlined
-            // until the foreground PACKAGE changed — which never happens inside a multi-game emulator —
-            // stranding controller/input threads on the dead cores. Bring them back immediately; re-onlining
-            // is always the safe direction (parking re-arms once continuous rendering resumes).
-            if (primeParked) {
-                setCoresOnline(primeCores(policies), true)
-                primeParked = false
-                parkSteady = 0
-            }
-            // A SUSTAINED render gap = a new game/content loading in the same emulator. Re-arm the settle gate
-            // so the next render session must prove itself (PARK_SETTLE_TICKS of continuous frames) before it
-            // can park again, and drop the per-session park penalties so each game in a multi-game emulator
-            // re-learns its park decision from scratch ("relearn on launch"). A brief 1-2 tick fps-read miss
-            // stays below the threshold so it doesn't needlessly re-arm mid-game.
+            // A SUSTAINED render gap = a new game/content loading in the same emulator ⇒ re-arm the settle
+            // gate ("relearn on launch"). A brief 1-2 tick fps-read miss stays below the threshold so it
+            // doesn't needlessly re-arm mid-game.
             notRenderingStreak++
-            if (notRenderingStreak >= SESSION_RESET_TICKS) {
-                sessionSettled = false
-                parkCooldown = 0
-                parkHurtCount = 0
-            }
+            onRenderingStopped(policies, sustained = notRenderingStreak >= SESSION_RESET_TICKS)
             return Decision(Action.HOLD, caps)
         }
         notRenderingStreak = 0
@@ -359,6 +344,45 @@ class AutoTuneController(
      * NOT gated on battery: AutoTDP means efficiency regardless of power source (parking also sheds heat).
      * Re-online the moment anything goes wrong; a cooldown after a park that hurt fps prevents flapping.
      */
+    /**
+     * The rendering-stopped safety block, shared by [step]'s not-rendering early return and the screen-off
+     * pause ([pauseForScreenOff]). Safety: never hold the prime cores offline while nothing is rendering —
+     * a prime parked just before rendering stopped (an in-emulator game switch, a load screen, a pause,
+     * the display turning off) would otherwise stay offlined until the foreground PACKAGE changed — which
+     * never happens inside a multi-game emulator — stranding controller/input threads on the dead cores.
+     * Re-onlining is always the safe direction (parking re-arms once continuous rendering resumes).
+     * [sustained] additionally re-arms the settle gate + drops the per-session park penalties so the next
+     * render session re-learns its park decision from scratch.
+     */
+    private fun onRenderingStopped(policies: List<CpuPolicyInfo>, sustained: Boolean) {
+        steadyCount = 0
+        lastTrimPolicy = null
+        wBeforeTrim = null
+        bottleneck = Bottleneck.NONE
+        if (primeParked) {
+            setCoresOnline(primeCores(policies), true)
+            primeParked = false
+            parkSteady = 0
+        }
+        if (sustained) {
+            sessionSettled = false
+            parkCooldown = 0
+            parkHurtCount = 0
+        }
+    }
+
+    /**
+     * Screen-off hand-off for the watcher's TOTAL-sleep gate: [step] stops being called entirely while the
+     * display is off, so run the rendering-stopped safety NOW — re-online a parked prime (never leave cores
+     * offline unattended) and re-arm the settle gate as a sustained gap would, so wake re-decides parking
+     * from scratch. Session identity and the learned power model are untouched; stepping resumes on the
+     * first screen-on tick.
+     */
+    fun pauseForScreenOff(policies: List<CpuPolicyInfo>) {
+        notRenderingStreak = 0
+        onRenderingStopped(policies, sustained = true)
+    }
+
     private fun handlePrimeParking(
         policies: List<CpuPolicyInfo>,
         fps: Float,
@@ -466,7 +490,16 @@ class AutoTuneController(
         // lift a prime-gated frame.
         val reachedTarget = targetFps <= 0 || fps >= targetFps
         val below = targetFps > 0 && fps < targetFps * TARGET_HYST_LO
-        val primeWalled = below && cpuCorePeakPct >= CPU_CORE_BOUND && gpuBusyPct in 0 until BOUND_THRESHOLD
+        // Gated to Odin power tuning: the SD 8 Gen 2's prime SCALES, so it must keep chasing (raising) — never
+        // settle. With the flag off, primeWalled is always false ⇒ the latch never engages and both settle
+        // short-circuits below are skipped.
+        // The core must be TRULY PEGGED (>= CPU_CORE_WALL ~90), not merely busy: a light game (Megabonk) whose
+        // hottest core sits at 66–81 % is NOT prime-gated — raising its clocks DOES lift fps — so it must keep
+        // chasing/holding 60. Only a near-pegged core (Stray's vendor-floored Box64 thread, 95–100) is the real
+        // wall the settle exists for. CPU_CORE_BOUND (65) is the bottleneck-detection bar; the settle needs the
+        // stricter "actually maxed" bar or it strangles a cool 5 W / 44 °C mid-range game into GPU oscillation.
+        val primeWalled = wattCapAndSettleEnabled &&
+            below && cpuCorePeakPct >= CPU_CORE_WALL && gpuBusyPct in 0 until BOUND_THRESHOLD
         if (primeWalled) {
             primeBoundStreak = (primeBoundStreak + 1).coerceAtMost(PRIME_BOUND_CONFIRM)
             if (primeBoundStreak >= PRIME_BOUND_CONFIRM) primeBoundLatched = true
@@ -498,7 +531,7 @@ class AutoTuneController(
         // the prime — its draw can't be capped). Acts on the SMOOTHED draw so a single-tick spike doesn't trim;
         // stands down while charging (drawWEma -1) — the thermal ceiling above is the backstop then.
         val powerCeilingW = gateParams().powerCeilingW
-        if (drawWEma > 0f && drawWEma > powerCeilingW) {
+        if (wattCapAndSettleEnabled && drawWEma > 0f && drawWEma > powerCeilingW) {
             powerCooldown = POWER_COOLDOWN_TICKS // hold off chase-raises for a few ticks so we don't bounce back over
             lastTrimPolicy = null
             return if (thermalTrim(policies) != null) Action.TRIM else Action.HOLD
@@ -675,7 +708,8 @@ class AutoTuneController(
             // sustain (the power rail above would trim it right back ⇒ oscillation). Hold at the budget. The
             // cooldown is the sticky part: it suppresses the chase even once the smoothed draw dips back under,
             // which is what stops the raise→spike→trim bounce. Safety raises (stutter recovery) above aren't gated.
-            if (drawWEma > 0f && (powerCooldown > 0 || drawWEma >= gateParams().powerCeilingW * POWER_RAISE_FRAC)) {
+            if (wattCapAndSettleEnabled && drawWEma > 0f &&
+                (powerCooldown > 0 || drawWEma >= gateParams().powerCeilingW * POWER_RAISE_FRAC)) {
                 lastTrimPolicy = null
                 return Action.HOLD
             }
@@ -884,7 +918,7 @@ class AutoTuneController(
     /** Per-[bias] tuning: margin-gate (tail-EMA α + suppress/pre-raise thresholds × budget + confirm) AND the
      *  thermal CEILING (°C) AutoTDP holds by trimming perf+GPU, overriding the fps target. EFFICIENT smooths
      *  hard + high gate thresholds + a LOW (quiet) ceiling; SMOOTH the reverse (responsive + a higher ceiling). */
-    private data class GateParams(
+    internal data class GateParams(
         val alpha: Float,
         val nearFrac: Float,
         val overFrac: Float,
@@ -892,7 +926,12 @@ class AutoTuneController(
         val ceilingC: Int,
         val powerCeilingW: Float,
     )
-    private fun gateParams(): GateParams = when (bias) {
+    private fun gateParams(): GateParams = gateParamsFor(bias)
+
+    /** [gateParams] for an explicit [b] — exposed (internal, no behavior change) so unit tests can pin the
+     *  per-bias values AND the EFFICIENT→SMOOTH monotonic gradient without driving a full session. Pure: reads
+     *  nothing but [b]. The live decision path always goes through [gateParams] (= `gateParamsFor(bias)`). */
+    internal fun gateParamsFor(b: AutoTdpBias): GateParams = when (b) {
         // ceilingC sits ABOVE the chip's uncoolable prime floor (~80 °C on the Odin under heavy load) so the
         // trim is REACHABLE — a ceiling below the floor (the old EFFICIENT 74) saturates: it strangles the GPU
         // to its floor forever (Stray 60→42 fps) for ~0 thermal/power gain. Above the floor the ceiling is a
@@ -900,9 +939,9 @@ class AutoTuneController(
         // bite, clocks only trim when it can't hold. Band width (floor→ceiling) = the bias's noise↔fps trade.
         // powerCeilingW (the sustained draw each mode holds) is the PRIMARY lever — see [powerCeilingW]; over
         // the chassis envelope, heat outruns cooling regardless of fan. ceilingC is the thermal backstop.
-        AutoTdpBias.EFFICIENT -> GateParams(alpha = 0.30f, nearFrac = 1.9f, overFrac = 2.2f, confirm = 3, ceilingC = 82, powerCeilingW = powerCeilingW(bias))
-        AutoTdpBias.BALANCED -> GateParams(alpha = 0.45f, nearFrac = 1.6f, overFrac = 1.9f, confirm = 2, ceilingC = 84, powerCeilingW = powerCeilingW(bias))
-        AutoTdpBias.SMOOTH -> GateParams(alpha = 0.60f, nearFrac = 1.3f, overFrac = 1.6f, confirm = 2, ceilingC = 87, powerCeilingW = powerCeilingW(bias))
+        AutoTdpBias.EFFICIENT -> GateParams(alpha = 0.30f, nearFrac = 1.9f, overFrac = 2.2f, confirm = 3, ceilingC = 82, powerCeilingW = powerCeilingW(b))
+        AutoTdpBias.BALANCED -> GateParams(alpha = 0.45f, nearFrac = 1.6f, overFrac = 1.9f, confirm = 2, ceilingC = 84, powerCeilingW = powerCeilingW(b))
+        AutoTdpBias.SMOOTH -> GateParams(alpha = 0.60f, nearFrac = 1.3f, overFrac = 1.6f, confirm = 2, ceilingC = 87, powerCeilingW = powerCeilingW(b))
     }
 
     /** The active bias's thermal-trim ceiling (°C). The fan loop reads this to target a temp just below it so
@@ -971,6 +1010,13 @@ class AutoTuneController(
             AutoTdpBias.SMOOTH -> 14f
         }
 
+        /** True only for the Odin (CQ8725S) — the device the watt cap + prime-walled settle are tuned for (tight
+         *  chassis, vendor-floored prime). The SD 8 Gen 2 (QCS8550, Thor/RP6) and any unknown SoC return false,
+         *  so they get plain chase-and-harvest. The UI also uses this to hide the per-mode watt labels there.
+         *  Delegates to the [com.kei.pulse.model.DeviceProfiles] invariants table. */
+        fun appliesOdinPowerTuning(socModel: String?): Boolean =
+            com.kei.pulse.model.DeviceProfiles.forSoc(socModel).appliesOdinPowerTuning
+
         private const val DRAW_ALPHA = 0.4f // EMA weight on live draw for the power ceiling (smooth out spikes)
         private const val POWER_RAISE_FRAC = 0.95f // don't raise clocks once draw is within 5% of the ceiling
         private const val POWER_COOLDOWN_TICKS = 4 // suppress chase-raises this many ticks after the cap fired
@@ -990,6 +1036,11 @@ class AutoTuneController(
         private const val GPU_SETTLE_BUSY = 80 // prime-bound settle: harvest the idle GPU only while busy% is
         // under this (leaves headroom below the 85 saturation line so the trim never makes the GPU the limiter)
         private const val CPU_CORE_BOUND = 65 // a single core this busy can be the limiter (hot game thread)
+        // The prime-WALLED settle needs a STRICTER bar than CPU_CORE_BOUND: only a near-pegged core (the vendor-
+        // floored prime / a maxed Box64 thread — Stray reads 95–100) is a true wall where chasing 60 is futile.
+        // A merely-busy core (Megabonk 66–81) still lifts fps when given clock, so it must NOT settle (that mis-
+        // fire harvested the GPU and oscillated a cool 5 W / 44 °C game — the "AutoTDP got worse" regression).
+        private const val CPU_CORE_WALL = 90 // a core must be ~pegged to count as the unreachable prime wall
         private const val CPU_CORE_GAP = 30 // …but only if it's this far above the aggregate (one hot thread,
         // not balanced multi-core load the aggregate already covers)
         private const val CPU_CORE_HOLD = 55 // once CPU-bound, hold it until the hot core drops below this

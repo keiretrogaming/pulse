@@ -132,6 +132,7 @@ fun MainTunerScreen(
     onAutoTdpEnabledChange: (Boolean) -> Unit,
     autoTdpFpsTarget: Int,
     autoTdpFpsOptions: List<Int>,
+    autoTdpShowWattCaps: Boolean,
     onAutoTdpFpsTargetChange: (Int) -> Unit,
     autoTdpAggressivePark: Boolean,
     onAutoTdpAggressiveParkChange: (Boolean) -> Unit,
@@ -184,6 +185,25 @@ fun MainTunerScreen(
                     estimatedPeakW = estimatedPeakW,
                 )
 
+                // Names the whole page so it's clear these are the everywhere-defaults, distinct from the
+                // per-app overrides (Settings → Per-app profiles).
+                Column(
+                    modifier = Modifier.padding(start = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        text = "Global Profile",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Text(
+                        text = "Applies to every app unless a per-app profile overrides it.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+
                 PulseSectionLabel("GLOBAL PERFORMANCE TIER")
                 AutoTdpModule(
                     enabled = autoTdpEnabled,
@@ -195,6 +215,7 @@ fun MainTunerScreen(
                     onAggressiveParkChange = onAutoTdpAggressiveParkChange,
                     bias = autoTdpBias,
                     onBiasChange = onAutoTdpBiasChange,
+                    showWattCaps = autoTdpShowWattCaps,
                 )
                 TierSelector(active = activeTier, onSelect = onSelectTier, enabled = !autoTdpEnabled)
 
@@ -211,10 +232,11 @@ fun MainTunerScreen(
 
                 CurrentFrequenciesCard(state = state)
 
-                // AutoTDP manages the fan + governor + clocks itself, so only the refresh rate stays
-                // adjustable while it's on.
+                // AutoTDP manages the governor + clocks itself, but the fan stays user-configurable: a
+                // Custom fan set here keeps running (cascaded) during AutoTDP, otherwise Smart is used.
+                // Only the governor hides while AutoTDP is on.
+                FanModule(currentMode = fanMode, onSelect = onSelectFanMode, editor = fanCurveEditor)
                 if (!autoTdpEnabled) {
-                    FanModule(currentMode = fanMode, onSelect = onSelectFanMode, editor = fanCurveEditor)
                     GovernorModule(current = governor, onSelect = onSelectGovernor)
                 }
 
@@ -1323,8 +1345,8 @@ private fun CpuPolicyInfo.isBoosted(valueKhz: Int): Boolean {
 
 internal fun formatFrequency(valueKhz: Int, boosted: Boolean = false): String {
     val base = when {
-        valueKhz >= 1_000_000 -> String.format("%.2f GHz", valueKhz / 1_000_000f)
-        valueKhz >= 1_000 -> String.format("%.0f MHz", valueKhz / 1_000f)
+        valueKhz >= 1_000_000 -> String.format(java.util.Locale.US, "%.2f GHz", valueKhz / 1_000_000f)
+        valueKhz >= 1_000 -> String.format(java.util.Locale.US, "%.0f MHz", valueKhz / 1_000f)
         else -> "$valueKhz kHz"
     }
     return if (boosted) "$base+" else base

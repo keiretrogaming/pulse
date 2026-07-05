@@ -39,6 +39,7 @@ class SettingsStorage(private val context: Context) {
     private val sleepProfileIdKey = stringPreferencesKey("sleep_profile_id")
     private val quickSettingsTilePromptShownKey = booleanPreferencesKey("quick_settings_tile_prompt_shown")
     private val quickSettingsTileAddedKey = booleanPreferencesKey("quick_settings_tile_added")
+    private val batteryOptPromptShownKey = booleanPreferencesKey("battery_opt_prompt_shown")
     private val themeIdKey = stringPreferencesKey("theme_id")
     private val colorSourceKey = stringPreferencesKey("color_source")
     private val accentColorKey = intPreferencesKey("accent_color")
@@ -65,6 +66,10 @@ class SettingsStorage(private val context: Context) {
 
     // In-game overlay (OSD) preferences.
     private val overlayEnabledKey = booleanPreferencesKey("overlay_enabled")
+    private val quickAccessEnabledKey = booleanPreferencesKey("quick_access_enabled")
+    private val quickAccessShowHandleKey = booleanPreferencesKey("quick_access_show_handle")
+    private val quickAccessComboKey = stringPreferencesKey("quick_access_combo")
+    private val quickAccessPerGameScopeKey = booleanPreferencesKey("quick_access_per_game_scope")
     private val overlayPresetKey = stringPreferencesKey("overlay_preset")
     private val overlayElementsKey = stringPreferencesKey("overlay_elements")
     private val overlayOpacityKey = intPreferencesKey("overlay_opacity")
@@ -108,6 +113,7 @@ class SettingsStorage(private val context: Context) {
             sleepProfileId = preferences[sleepProfileIdKey],
             hasPromptedQuickSettingsTile = preferences[quickSettingsTilePromptShownKey] ?: false,
             isQuickSettingsTileAdded = preferences[quickSettingsTileAddedKey] ?: false,
+            batteryOptPromptShown = preferences[batteryOptPromptShownKey] ?: false,
             powerTargetEnabled = preferences[powerTargetEnabledKey] ?: false,
             powerTargetPercent = preferences[powerTargetPercentKey] ?: 100,
             powerTargetCpuOnly = preferences[powerTargetCpuOnlyKey] ?: false,
@@ -123,6 +129,10 @@ class SettingsStorage(private val context: Context) {
             autoTdpAggressivePark = preferences[autoTdpAggressiveParkKey] ?: true,
             autoTdpBias = preferences[autoTdpBiasKey]?.let(::parseAutoTdpBias) ?: AutoTdpBias.EFFICIENT,
             overlayEnabled = preferences[overlayEnabledKey] ?: false,
+            quickAccessEnabled = preferences[quickAccessEnabledKey] ?: false,
+            quickAccessShowHandle = preferences[quickAccessShowHandleKey] ?: true,
+            quickAccessCombo = preferences[quickAccessComboKey],
+            quickAccessPerGameScope = preferences[quickAccessPerGameScopeKey] ?: true,
             overlayPreset = preferences[overlayPresetKey]?.let(::parseOverlayPreset) ?: OverlayPreset.COMPACT,
             // Existing users (no element key yet) inherit their saved preset's bundle — no migration logic needed.
             overlayElements = preferences[overlayElementsKey]?.let(::parseOverlayElements)
@@ -178,6 +188,24 @@ class SettingsStorage(private val context: Context) {
 
     suspend fun persistOverlayEnabled(enabled: Boolean) {
         context.settingsDataStore.edit { preferences -> preferences[overlayEnabledKey] = enabled }
+    }
+
+    suspend fun persistQuickAccessEnabled(enabled: Boolean) {
+        context.settingsDataStore.edit { preferences -> preferences[quickAccessEnabledKey] = enabled }
+    }
+
+    suspend fun persistQuickAccessShowHandle(show: Boolean) {
+        context.settingsDataStore.edit { preferences -> preferences[quickAccessShowHandleKey] = show }
+    }
+
+    suspend fun persistQuickAccessCombo(combo: String?) {
+        context.settingsDataStore.edit { preferences ->
+            if (combo.isNullOrBlank()) preferences.remove(quickAccessComboKey) else preferences[quickAccessComboKey] = combo
+        }
+    }
+
+    suspend fun persistQuickAccessPerGameScope(perGame: Boolean) {
+        context.settingsDataStore.edit { preferences -> preferences[quickAccessPerGameScopeKey] = perGame }
     }
 
     suspend fun persistOverlayPreset(preset: OverlayPreset) {
@@ -409,6 +437,12 @@ class SettingsStorage(private val context: Context) {
     suspend fun persistQuickSettingsTilePromptShown() {
         context.settingsDataStore.edit { preferences ->
             preferences[quickSettingsTilePromptShownKey] = true
+        }
+    }
+
+    suspend fun persistBatteryOptPromptShown() {
+        context.settingsDataStore.edit { preferences ->
+            preferences[batteryOptPromptShownKey] = true
         }
     }
 

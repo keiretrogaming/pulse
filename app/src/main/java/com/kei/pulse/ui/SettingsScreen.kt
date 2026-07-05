@@ -120,6 +120,11 @@ fun SettingsScreen(
     onOverlayPresetChange: (OverlayPreset) -> Unit = {},
     onOverlayElementToggle: (OverlayElement, Boolean) -> Unit = { _, _ -> },
     onOverlayOpacityChange: (Int) -> Unit = {},
+    onQuickAccessChange: (Boolean) -> Unit = {},
+    onQuickAccessShowHandleChange: (Boolean) -> Unit = {},
+    onSetQuickAccessCombo: () -> Unit = {},
+    onClearQuickAccessCombo: () -> Unit = {},
+    capturingCombo: Boolean = false,
 ) {
     var showResetConfirmation by remember { mutableStateOf(false) }
 
@@ -387,6 +392,79 @@ fun SettingsScreen(
                     checked = overlayEnabled,
                     onCheckedChange = onOverlayEnabledChange,
                 )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top,
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        text = "Quick Access bar",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        text = "Adjust performance, fan, and lighting without leaving your game. Open the panel " +
+                            "with the edge handle or your controller shortcut — changes apply instantly.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+                Switch(
+                    checked = settings.quickAccessEnabled,
+                    onCheckedChange = onQuickAccessChange,
+                )
+            }
+            if (settings.quickAccessEnabled) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        Text(
+                            text = "Edge handle",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Text(
+                            text = "Show a small tab on the screen edge that opens the panel.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = settings.quickAccessShowHandle,
+                        onCheckedChange = onQuickAccessShowHandleChange,
+                    )
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = "Controller shortcut: " +
+                            com.kei.pulse.data.InputComboParser.displayName(
+                                com.kei.pulse.data.InputComboParser.decode(settings.quickAccessCombo),
+                            ),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (capturingCombo) {
+                            Text(
+                                text = "Hold the buttons on your controller…",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.align(Alignment.CenterVertically),
+                            )
+                        } else {
+                            TextButton(onClick = onSetQuickAccessCombo) { Text("Set shortcut") }
+                            TextButton(onClick = onClearQuickAccessCombo) { Text("Clear") }
+                        }
+                    }
+                }
             }
             SettingsControlGroup(label = "Layout · density + quick-fill") {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

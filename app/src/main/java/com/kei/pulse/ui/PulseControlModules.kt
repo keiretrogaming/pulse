@@ -710,13 +710,13 @@ fun TelemetryHud(
                 modifier = Modifier.padding(vertical = 12.dp),
                 color = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f),
             )
-            val drawValue = snap.batteryDrawW?.let { String.format("%.1f", it) } ?: snap.batteryDrawMa?.toString()
+            val drawValue = snap.batteryDrawW?.let { String.format(java.util.Locale.US, "%.1f", it) } ?: snap.batteryDrawMa?.toString()
             val drawUnit = if (snap.batteryDrawW != null) "W" else "mA"
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 TelemetryMetric("CPU TEMP", snap.cpuTempC?.toString(), "°C", tempColor(snap.cpuTempC, muted), Modifier.weight(1f))
                 TelemetryMetric("GPU TEMP", snap.gpuTempC?.toString(), "°C", tempColor(snap.gpuTempC, muted), Modifier.weight(1f))
                 TelemetryMetric("DRAW", drawValue, drawUnit, drawColor(snap.batteryDrawW, snap.batteryDrawMa, estimatedPeakW, snap.isDischarging, muted), Modifier.weight(1f))
-                TelemetryMetric("EST PK", estimatedPeakW?.let { String.format("%.0f", it) }, "W", MaterialTheme.colorScheme.onSurface, Modifier.weight(1f))
+                TelemetryMetric("EST PK", estimatedPeakW?.let { String.format(java.util.Locale.US, "%.0f", it) }, "W", MaterialTheme.colorScheme.onSurface, Modifier.weight(1f))
             }
         }
     }
@@ -958,8 +958,9 @@ private fun wattLabel(w: Float): String = "%.1f".format(w).removeSuffix(".0")
 
 /**
  * AutoTDP master toggle. When on, PULSE dynamically trims the CPU first, then GPU, to hold each
- * foreground game's refresh-rate FPS (Smart fan, refresh rate untouched). It becomes the default
- * for any game without its own per-app binding, so the manual tier/clock controls are locked.
+ * foreground game's refresh-rate FPS (uses your Custom fan if set, otherwise Smart; refresh rate
+ * untouched). It becomes the default for any game without its own per-app binding, so the manual
+ * tier/clock controls are locked — but the fan stays adjustable.
  */
 @Composable
 fun AutoTdpModule(
@@ -972,6 +973,7 @@ fun AutoTdpModule(
     onAggressiveParkChange: (Boolean) -> Unit,
     bias: AutoTdpBias,
     onBiasChange: (AutoTdpBias) -> Unit,
+    showWattCaps: Boolean = true, // only the Odin enforces per-mode watt caps; hidden on the SD 8 Gen 2
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -1008,14 +1010,15 @@ fun AutoTdpModule(
             Text(
                 text = if (enabled) {
                     "Automatically tunes the CPU and GPU clocks on the fly, aiming to hold each app's " +
-                        "frame rate at the lowest power, with the Smart fan curve enabled. The tier and " +
-                        "manual controls below are locked while AutoTDP is on. Per-app bindings still take " +
-                        "priority, and a hand-tuned manual profile may still perform better in some games."
+                        "frame rate at the lowest power. It uses your Custom fan if you've set one (it keeps " +
+                        "running, cascaded), otherwise the Smart fan. The tier and manual clock controls below " +
+                        "are locked while AutoTDP is on, but the fan stays adjustable. Per-app bindings still " +
+                        "take priority, and a hand-tuned manual profile may still perform better in some games."
                 } else {
                     "Automatically tunes the CPU and GPU clocks on the fly to hold your FPS target at the " +
-                        "lowest power — games, emulators and even media — with the Smart fan curve and the " +
-                        "panel pinned to max refresh. Runs on any app except PULSE and the home screen; " +
-                        "per-app bindings take priority."
+                        "lowest power — games, emulators and even media — using your Custom fan if set, " +
+                        "otherwise Smart, with the panel pinned to max refresh. Runs on any app except PULSE " +
+                        "and the home screen; per-app bindings take priority."
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1074,7 +1077,7 @@ fun AutoTdpModule(
                 ) {
                     AutoTdpBias.entries.forEach { b ->
                         PulseChip(
-                            label = "${b.label} · ${wattLabel(AutoTuneController.powerCeilingW(b))}W",
+                            label = if (showWattCaps) "${b.label} · ${wattLabel(AutoTuneController.powerCeilingW(b))}W" else b.label,
                             selected = bias == b,
                             accent = MaterialTheme.colorScheme.primary,
                             onClick = { onBiasChange(b) },
@@ -1082,8 +1085,9 @@ fun AutoTdpModule(
                     }
                 }
                 Text(
-                    text = "Caps sustained power to ~${wattLabel(AutoTuneController.powerCeilingW(bias))} W — the " +
-                        "chassis envelope; over it, heat outruns the fan. " + when (bias) {
+                    text = (if (showWattCaps)
+                        "Caps sustained power to ~${wattLabel(AutoTuneController.powerCeilingW(bias))} W — the " +
+                            "chassis envelope; over it, heat outruns the fan. " else "") + when (bias) {
                         AutoTdpBias.EFFICIENT ->
                             "Harvests clocks hard while play is smooth; only steps in on a sustained stutter. " +
                                 "Lowest power and quietest — may allow rare micro-hitches in the heaviest moments."

@@ -40,23 +40,7 @@ import com.kei.pulse.model.OverlayPreset
 import kotlinx.coroutines.flow.StateFlow
 import kotlin.math.roundToInt
 
-// Semantic meter for temps/load: cool → warm → hot, independent of theme accent.
-private val MeterCool = Color(0xFF4FD89B)
-private val MeterWarm = Color(0xFFFFB000)
-private val MeterHot = Color(0xFFFF5D6C)
-
-private fun meterRamp(fraction: Float): Color {
-    val f = fraction.coerceIn(0f, 1f)
-    return if (f < 0.5f) lerpColor(MeterCool, MeterWarm, f * 2f)
-    else lerpColor(MeterWarm, MeterHot, (f - 0.5f) * 2f)
-}
-
-private fun lerpColor(a: Color, b: Color, t: Float) = Color(
-    red = a.red + (b.red - a.red) * t,
-    green = a.green + (b.green - a.green) * t,
-    blue = a.blue + (b.blue - a.blue) * t,
-    alpha = 1f,
-)
+// Temp/load coloring comes from the shared MeterColors ramp (also used by the Quick Access bar).
 
 @Composable
 fun OverlayContent(
@@ -484,8 +468,8 @@ private fun Sparkline(values: List<Float>, color: Color, modifier: Modifier) {
 
 private fun num(v: Int?): String = v?.toString() ?: "—"
 private fun pct(v: Int?): String = v?.toString() ?: "—"
-private fun fmt1(v: Float?): String = v?.let { String.format("%.1f", it) } ?: "—"
-private fun ghz(mhz: Int?): String = mhz?.let { String.format("%.2f", it / 1000f) } ?: "—"
+private fun fmt1(v: Float?): String = v?.let { String.format(java.util.Locale.US, "%.1f", it) } ?: "—"
+private fun ghz(mhz: Int?): String = mhz?.let { String.format(java.util.Locale.US, "%.2f", it / 1000f) } ?: "—"
 private fun fpsText(fps: Float?): String = fps?.takeIf { it > 0f }?.roundToInt()?.toString() ?: "—"
 
 /** Battery time-left: "2h14m" / "47m", or "—" when not estimable (charging, idle draw, unknown capacity). */
@@ -498,7 +482,7 @@ private fun leftText(minutes: Int?): String {
 
 /** Power readout: "3.4" (system draw on battery) or "⚡18.5" (charge rate while plugged in); "—" when unknown. */
 private fun powerValue(stats: OverlayStats): String {
-    val v = stats.powerDrawW?.let { String.format("%.1f", it) } ?: return "—"
+    val v = stats.powerDrawW?.let { String.format(java.util.Locale.US, "%.1f", it) } ?: return "—"
     return if (stats.powerIsCharging) "⚡$v" else v
 }
 
@@ -508,8 +492,8 @@ private const val THROTTLE_TEMP_C = 85
 private fun isThrottling(t: TelemetrySnapshot): Boolean =
     (t.cpuTempC ?: 0) >= THROTTLE_TEMP_C || (t.gpuTempC ?: 0) >= THROTTLE_TEMP_C
 
-private fun tempColor(c: Int?): Color = c?.let { meterRamp((it - 40f) / 50f) } ?: MeterCool
-private fun loadColor(p: Int?): Color = p?.let { meterRamp(it / 100f) } ?: MeterCool
+private fun tempColor(c: Int?): Color = meterTempColor(c)
+private fun loadColor(p: Int?): Color = meterLoadColor(p)
 
 // AutoTDP caps: a trimmed domain (below 100%) is the savings — show it green; full clocks stay neutral.
 @Composable
@@ -521,5 +505,5 @@ private fun formatTimer(ms: Long): String {
     val h = s / 3600
     val m = (s % 3600) / 60
     val sec = s % 60
-    return if (h > 0) String.format("%d:%02d:%02d", h, m, sec) else String.format("%d:%02d", m, sec)
+    return if (h > 0) String.format(java.util.Locale.US, "%d:%02d:%02d", h, m, sec) else String.format(java.util.Locale.US, "%d:%02d", m, sec)
 }

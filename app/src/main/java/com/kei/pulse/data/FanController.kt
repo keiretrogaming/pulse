@@ -55,8 +55,9 @@ class FanController {
         }
         // The stock controller caches the active mode and won't re-apply when set to the
         // same direction it already cached. Bounce through a different real mode first to
-        // force a reload, then set the target.
-        val bounce = if (mode == SMART) SPORT else SMART
+        // force a reload, then set the target. Reaching Smart bounces through SILENT (low),
+        // never SPORT (high), so restoring Smart on game-exit dips quietly instead of revving.
+        val bounce = bounceModeFor(mode)
         RootSupport.runRootCommand(
             "settings put system fan_mode $bounce; " +
                 "settings put system fan_mode $mode; " +
@@ -73,6 +74,16 @@ class FanController {
         /** Smart is the confirmed stock default and the safe fallback. */
         const val SMART = 4
         const val SPORT = 5
+        /** Silent (low fan) — the quiet bounce mode when re-applying Smart so the fan dips instead of revving. */
+        const val SILENT = 1
+
+        /**
+         * The intermediate mode [setMode] bounces through to force the stock controller to reload [target]
+         * (it caches the active mode and won't re-apply the same one). Must differ from [target]. Reaching
+         * SMART routes through SILENT (low fan) rather than SPORT (high fan), so handing the fan back to Smart
+         * — e.g. when AutoTDP restores it on game-exit — dips quietly instead of audibly revving the fan.
+         */
+        fun bounceModeFor(target: Int): Int = if (target == SMART) SILENT else SMART
 
         /**
          * PULSE-driven custom fan curve (Odin 3 only). Not a stock fan_mode — when selected, the service
@@ -91,7 +102,7 @@ class FanController {
         // Confirmed on Odin 3 via the device's own fan toggle: Silent=1, Smart=4, Sport=5; Custom is ours.
         // The fan card shows the live fan_mode number, so any mismatch is self-revealing.
         val MODES: List<FanMode> = listOf(
-            FanMode(1, "Silent"),
+            FanMode(SILENT, "Silent"),
             FanMode(SMART, "Smart"),
             FanMode(SPORT, "Sport"),
             FanMode(CUSTOM, "Custom"),

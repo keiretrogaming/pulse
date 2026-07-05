@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.app.usage.UsageEvents
 import android.app.usage.UsageStatsManager
+import android.view.inputmethod.InputMethodManager
 import android.content.Context
 import android.content.Intent
 import android.os.Build
@@ -18,6 +19,7 @@ import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
+import android.media.AudioManager
 import androidx.core.content.getSystemService
 import com.kei.pulse.AppContainer
 import com.kei.pulse.MainActivity
@@ -35,6 +37,11 @@ import com.kei.pulse.data.TelemetryReader
 import com.kei.pulse.data.TelemetrySnapshot
 import com.kei.pulse.model.AppSettings
 import com.kei.pulse.model.AutoTdpBias
+import com.kei.pulse.model.CustomFanGate
+import com.kei.pulse.model.CustomFanState
+import com.kei.pulse.model.DeviceProfiles
+import com.kei.pulse.model.FanAction
+import com.kei.pulse.model.FanArbiter
 import com.kei.pulse.model.FanCurve
 import com.kei.pulse.model.FanTempController
 import com.kei.pulse.model.CpuPolicyInfo
@@ -48,6 +55,11 @@ import com.kei.pulse.overlay.ClusterReadout
 import com.kei.pulse.overlay.OverlayConfig
 import com.kei.pulse.overlay.OverlayStats
 import com.kei.pulse.overlay.PerformanceOverlay
+import com.kei.pulse.overlay.QuickAccessAction
+import com.kei.pulse.overlay.QuickAccessActions
+import com.kei.pulse.overlay.QuickAccessOverlay
+import com.kei.pulse.overlay.QuickAccessPerApp
+import com.kei.pulse.overlay.QuickAccessScope
 import com.kei.pulse.overlay.MINUTES_SMOOTH_ALPHA
 import com.kei.pulse.overlay.batteryMinutesLeft
 import com.kei.pulse.overlay.batteryMinutesToFull
@@ -84,11 +96,411 @@ class ForegroundAppMonitorService : Service() {
     @Volatile private var customFanRunning = false
     private var fanLoopJob: Job? = null // fast duty slew loop (drives the Custom curve smoothly)
     private var smoothedFanTempC: Float? = null // EMA of the SoC temp so curve targeting ignores ±1°C noise
+    // IDLE-ON-SMART gate (global Custom fan only): engage fan_mode=6 only when active cooling is needed, else
+    // leave the fan on vendor Smart so a dead PULSE can't strand the duty loud. See [CustomFanGate].
+    private var customFanGate = CustomFanState()
     private val refreshRateController = RefreshRateController()
     private val governorController = GovernorController()
     private val telemetryReader = TelemetryReader()
     private val fpsReader by lazy { FpsReader(this) }
     private val overlay by lazy { PerformanceOverlay(this) }
+    private val quickAccess by lazy { QuickAccessOverlay(this) }
+    private var comboJob: Job? = null // getevent detect loop for the Quick Access combo (when set + enabled)
+    private var comboWatching: String? = null // the combo string the live comboJob is watching
+    // The combo watcher stays ARMED whenever the bar is enabled+permitted (surviving neutral-foreground
+    // blips — Settings, home — which used to kill it and cost a ~1 s re-arm on return); only the ACTION is
+    // gated on the bar being showable, so the combo still opens nothing outside a game. Screen-off disarms
+    // it (the TOTAL-sleep one-shot), killing the getevent producer for the night.
+    @Volatile
+    private var qaComboActionAllowed = false
+    // TOTAL-sleep gate edge tracking ([SleepGate]): true at start (the service starts from user interaction).
+    private var screenWasOn = true
+    private var qaSettingsJob: Job? = null // reactive settings feed for the QA bar (replaces per-tick snapshots)
+    // Quick Access Bar (experimental). Default-OFF, so inert unless the user enables it. AutoTDP controls
+    // target the FOREGROUND game's per-app profile; fan/RGB/OSD are global. Either way we push the updated
+    // state straight back to the overlay so the panel reflects instantly (no poll-tick lag).
+    private val quickAccessActions = QuickAccessActions { action ->
+        serviceScope.launch { applyQuickAccessAction(action) }
+    }
+
+    private suspend fun applyQuickAccessAction(action: QuickAccessAction) {
+        if (QuickAccessPerApp.isPerAppAction(action)) {
+            val settings = container.settingsStorage.settings.first()
+            // SteamOS-style scope: "All games" routes the perf edit to the GLOBAL default instead of the
+            // foreground game's per-app profile (pure decision in QuickAccessScope; the device apply reuses the
+            // verified foreground/AutoTDP/tier paths).
+            if (QuickAccessScope.routesGlobal(action, settings.quickAccessPerGameScope)) {
+                applyGlobalPerfAction(action)
+                return
+            }
+            val pkg = boundPackage ?: lastForeground ?: return
+            val perAppStore = container.perAppConfigStorage
+            val existing = perAppStore.configs.first().firstOrNull { it.packageName == pkg }
+            // The toggle needs the global AutoTDP default to flip the EFFECTIVE state (so turning off writes an
+            // explicit AUTO_OFF that overrides a global-on, not a null that re-inherits it — QA bug #1).
+            val globalDefault = settings.autoTdpDefaultEnabled
+            val updated = QuickAccessPerApp.applyPerAppAction(existing, pkg, action, globalDefault)
+            // OPTIMISTIC UI — reflect the pick in the panel IMMEDIATELY, before the slow part (a DataStore write
+            // + the root device apply under transitionMutex). This is what makes mode-switching feel Deck-snappy:
+            // the chip highlights at once and the device catches up a beat later. The in-memory `boundConfig` is
+            // updated inside applyLiveEdit UNDER transitionMutex (the only other writer is handleForegroundChange,
+            // also under the lock) so the bound state is never mutated lock-free.
+            quickAccess.updatePerApp(updated)
+            perAppStore.saveConfig(updated)
+            perAppStore.persistEnabled(true) // per-app must be on for the profile to take effect
+            // AUDIT: one line per applied action — the ten-second answer to "why did X change?" (the
+            // bias=SMOOTH incident took a DataStore autopsy because nothing logged applied actions).
+            android.util.Log.i("PulseQA", "${com.kei.pulse.overlay.QuickAccess.auditLabel(action)} → $pkg (per-game)")
+            // Make the edit take effect on the RUNNING game — the poll loop only re-binds on a foreground CHANGE,
+            // so without this a live toggle/value edit would wait for an alt-tab (QA bug #2).
+            if (pkg == boundPackage) applyLiveEdit(pkg, updated, action, globalDefault)
+            return
+        }
+        // Global system controls (set-and-leave, like the Deck) — applied directly to the device; the panel
+        // reflects the live value from telemetry (read each poll into OverlayStats), not AppSettings.
+        when (action) {
+            // DEBUG level: the sliders fire per 5% step — INFO would flood a drag; they're not the incident class.
+            is QuickAccessAction.SetBrightness -> {
+                android.util.Log.d("PulseQA", com.kei.pulse.overlay.QuickAccess.auditLabel(action))
+                applyBrightnessPercent(action.percent)
+                return
+            }
+            is QuickAccessAction.SetVolume -> {
+                android.util.Log.d("PulseQA", com.kei.pulse.overlay.QuickAccess.auditLabel(action))
+                applyVolumePercent(action.percent)
+                return
+            }
+            else -> Unit
+        }
+        val store = container.settingsStorage
+        val next = com.kei.pulse.overlay.QuickAccess.reduce(store.settings.first(), action)
+        // No optimistic updateSettings push here: the panel's settings come from the REACTIVE feed, which
+        // emits within ms of the persist below. An optimistic push raced other persists' re-emissions (any
+        // mid-session settings write re-emits the whole snapshot) and could revert the chip for a frame.
+        when (action) {
+            is QuickAccessAction.SetFanMode -> store.persistManagedFanMode(next.managedFanMode)
+            is QuickAccessAction.SetFanTargetTemp -> store.persistFanTargetTemp(next.fanTargetTempC)
+            is QuickAccessAction.SetFanBias -> store.persistFanBias(next.fanBias)
+            is QuickAccessAction.SetFanSmart -> store.persistFanSmartEnabled(next.fanSmartEnabled)
+            is QuickAccessAction.SetRgbMode -> store.persistRgbMode(next.rgbMode)
+            is QuickAccessAction.SetRgbColor ->
+                store.persistRgbManualStick(com.kei.pulse.model.RgbStick.BOTH, next.rgbManualLeftColor, next.rgbManualLeftBrightness)
+            is QuickAccessAction.SetOverlayEnabled -> store.persistOverlayEnabled(next.overlayEnabled)
+            is QuickAccessAction.SetOverlayPreset -> {
+                store.persistOverlayPreset(next.overlayPreset)
+                store.persistOverlayElements(next.overlayElements)
+            }
+            is QuickAccessAction.SetScope -> {
+                store.persistQuickAccessPerGameScope(next.quickAccessPerGameScope)
+                applyScopeCommit(action.perGame)
+            }
+            is QuickAccessAction.SetPowerTarget -> applyQaPowerTarget(next.powerTargetPercent, next.powerTargetEnabled)
+            is QuickAccessAction.SetGpuCap -> applyQaGpuCap(action.freqKhz)
+            is QuickAccessAction.SetBrightness, is QuickAccessAction.SetVolume -> Unit // global system, handled above
+            is QuickAccessAction.ToggleAutoTdp, is QuickAccessAction.SetTier, is QuickAccessAction.SetStockMode,
+            is QuickAccessAction.SetFpsTarget, is QuickAccessAction.SetBias,
+            is QuickAccessAction.SetAggressivePark -> Unit // perf, handled above (per-app or global)
+        }
+        android.util.Log.i("PulseQA", "${com.kei.pulse.overlay.QuickAccess.auditLabel(action)} (global)")
+    }
+
+    /**
+     * Apply a Quick Access PERFORMANCE edit in GLOBAL scope ("All games"): write the global default + reflect
+     * it in the bar, then make it take effect on the running foreground game by reusing the already-verified
+     * paths (the foreground bind reconciler / the AutoTDP re-push / the device-wide tier apply). A game with
+     * its OWN per-app binding is never disturbed — the edit-switch model is non-destructive (see
+     * [QuickAccessScope.followsGlobal]). NOTE: the live device behavior here (esp. the tier vs. the bound-game
+     * restore snapshot) is the on-device verification target for this feature — the routing/reduce is unit-tested.
+     */
+    private suspend fun applyGlobalPerfAction(action: QuickAccessAction) {
+        val store = container.settingsStorage
+        val next = QuickAccessScope.globalReduce(store.settings.first(), action)
+        // (No optimistic updateSettings — the reactive settings feed reflects the persist within ms.)
+        when (action) {
+            is QuickAccessAction.ToggleAutoTdp, is QuickAccessAction.SetStockMode -> {
+                store.persistAutoTdpDefaultEnabled(next.autoTdpDefaultEnabled)
+                // Reconcile the foreground game's AutoTDP bind state to the new default via the SAME path a
+                // foreground change uses (it owns its snapshot/restore). A per-app-bound game is a no-op.
+                (boundPackage ?: lastForeground)?.let { handleForegroundChange(it) }
+            }
+            is QuickAccessAction.SetFpsTarget -> {
+                store.persistAutoTdpFpsTarget(next.autoTdpFpsTarget)
+                repushGlobalAutoTdp(QuickAccessScope.GlobalPerfField.FPS)
+            }
+            is QuickAccessAction.SetBias -> {
+                store.persistAutoTdpBias(next.autoTdpBias)
+                repushGlobalAutoTdp(QuickAccessScope.GlobalPerfField.BIAS)
+            }
+            is QuickAccessAction.SetAggressivePark -> {
+                store.persistAutoTdpAggressivePark(next.autoTdpAggressivePark)
+                repushGlobalAutoTdp(QuickAccessScope.GlobalPerfField.PARK)
+            }
+            is QuickAccessAction.SetTier -> {
+                store.persistAutoTdpDefaultEnabled(false)
+                store.persistActiveTierLabel(action.tier.label)
+                applyGlobalTier(action.tier)
+            }
+            else -> Unit
+        }
+        android.util.Log.i("PulseQA", "${com.kei.pulse.overlay.QuickAccess.auditLabel(action)} (global default)")
+    }
+
+    /**
+     * Re-push the global AutoTDP target/bias/park to a RUNNING session that DERIVES [field] from the global —
+     * a following-global game, or an AUTO_BINDING game whose per-app value for that field is null (its
+     * `effective*` falls back to the global; gating on followsGlobal alone missed those). Passes the bound
+     * config so the session's OTHER per-app values stay in force.
+     */
+    private suspend fun repushGlobalAutoTdp(field: QuickAccessScope.GlobalPerfField) {
+        transitionMutex.withLock {
+            val pkg = autoTdpPackage ?: return
+            if (QuickAccessScope.receivesGlobalPerfEdit(boundConfig, field)) applyAutoTdpRegulation(pkg, boundConfig)
+        }
+    }
+
+    /**
+     * The Quick Access Power Target slider — the SACRED apply path, mirroring the in-app slider exactly:
+     * caps from the shared [com.kei.pulse.model.PowerTargetMath], applied via
+     * `repository.applyValues(persistAsCustom = true)`, and — the part the vendor daemon punishes you for
+     * skipping — [captureBoundReassertCaps] afterwards so the per-tick re-assert holds the NEW caps instead
+     * of stomping them back to the old ones. Persist mirrors the in-app persistTuning pair (live tuning state
+     * + the Custom side-control snapshot, so preset⟷Custom cycling restores the knob). While an AutoTDP
+     * session owns the clocks the device write is SKIPPED (persist-only) — AutoTDP re-asserts its own caps
+     * every tick and would fight any direct write.
+     */
+    private suspend fun applyQaPowerTarget(percent: Int, enabled: Boolean) {
+        val store = container.settingsStorage
+        val s = store.settings.first()
+        store.persistTuningState(
+            powerTargetEnabled = enabled,
+            powerTargetPercent = percent,
+            powerTargetCpuOnly = s.powerTargetCpuOnly,
+            gpuLocked = s.gpuLocked,
+            gpuFloorPercent = s.gpuFloorPercent,
+            cpuFloorPercent = s.cpuFloorPercent,
+            activeTierLabel = PowerTier.CUSTOM.label, // a Power Target edit is a Custom-tier edit, as in-app
+            primeCoreBoostLimited = s.primeCoreBoostLimited,
+        )
+        store.persistCustomTuning(
+            store.customTuning.first().copy(powerTargetEnabled = enabled, powerTargetPercent = percent),
+        )
+        transitionMutex.withLock {
+            if (autoTdpPackage != null) {
+                android.util.Log.i("PulseQA", "SetPowerTarget $percent% persisted only — AutoTDP owns the clocks")
+                return
+            }
+            val policies = ensurePolicies()
+            if (policies.isEmpty()) return
+            val values = com.kei.pulse.model.PowerTargetMath.capsForPercent(policies, percent, s.powerTargetCpuOnly)
+            container.repository.applyValues(
+                policies = policies,
+                selectedValues = values,
+                isReset = percent >= 100,
+                appliedDisplayProfileId = ProfileStateResolver.MANUAL_PROFILE_ID,
+                persistAsCustom = true,
+            )
+            if (boundPackage != null) captureBoundReassertCaps()
+        }
+    }
+
+    /**
+     * The Quick Access GPU-cap stepper. The merge-with-saved-Custom logic lives in
+     * [com.kei.pulse.data.PerformanceRepository.applyGpuCap] (a partial persistAsCustom map would wipe the
+     * saved CPU values); this wraps it with the same AutoTDP guard + re-assert capture as the Power Target.
+     */
+    private suspend fun applyQaGpuCap(freqKhz: Int) {
+        transitionMutex.withLock {
+            if (autoTdpPackage != null) {
+                android.util.Log.i("PulseQA", "SetGpuCap ${freqKhz / 1000}MHz skipped — AutoTDP owns the clocks")
+                return
+            }
+            container.repository.applyGpuCap(freqKhz)
+            if (boundPackage != null) captureBoundReassertCaps()
+        }
+    }
+
+    /**
+     * The scope switch's REAL semantics (user-chosen 2026-07-03, committed via an explicit A-press on the
+     * bar): "Global" DELETES the foreground game's per-app profile so it truly follows the global defaults;
+     * "Per-Game" creates one seeded from the current effective global mode. The plan is the pure, tested
+     * [QuickAccessScope.scopeCommitPlan]; the device re-resolve reuses [handleForegroundChange] — which owns
+     * transitionMutex and the snapshot/restore contract, so do NOT wrap this in the mutex (not reentrant) —
+     * with force=true so a same-package rebind isn't skipped. The pre-game snapshot lives in separate storage
+     * and is untouched by the profile delete, so game-exit still restores it.
+     */
+    private suspend fun applyScopeCommit(perGame: Boolean) {
+        val pkg = boundPackage ?: lastForeground
+        val existing = pkg?.let { p -> container.perAppConfigStorage.configs.first().firstOrNull { it.packageName == p } }
+        val settings = container.settingsStorage.settings.first()
+        when (val plan = QuickAccessScope.scopeCommitPlan(perGame, pkg, existing, settings)) {
+            is QuickAccessScope.ScopeCommit.DeleteProfile -> {
+                container.perAppConfigStorage.removeConfig(plan.packageName)
+                quickAccess.updatePerApp(null) // optimistic — the reactive rebind catches up a beat later
+                handleForegroundChange(plan.packageName, force = true)
+                android.util.Log.i("PulseQA", "ScopeCommit GLOBAL: removed profile for ${plan.packageName}")
+            }
+            is QuickAccessScope.ScopeCommit.CreateSeeded -> {
+                container.perAppConfigStorage.saveConfig(plan.config)
+                container.perAppConfigStorage.persistEnabled(true) // per-app must be on for the profile to bind
+                quickAccess.updatePerApp(plan.config)
+                handleForegroundChange(plan.config.packageName, force = true)
+                android.util.Log.i(
+                    "PulseQA",
+                    "ScopeCommit PER-GAME: created profile for ${plan.config.packageName} (${plan.config.profileBinding})",
+                )
+            }
+            QuickAccessScope.ScopeCommit.FlagOnly ->
+                android.util.Log.i("PulseQA", "ScopeCommit ${if (perGame) "PER-GAME" else "GLOBAL"}: flag only (pkg=$pkg)")
+        }
+    }
+
+    /**
+     * Apply a power tier device-wide (the set-and-leave main-UI path). NON-DESTRUCTIVE: when a game with its
+     * OWN per-app binding is foreground, only the persisted default changes — writing the device would just be
+     * stomped back by the bound game's cap re-assert ~2s later (a pure UI-vs-device divergence flicker). The
+     * tier lands when a following-global context is next active. A following-global AutoTDP session is stopped
+     * first so it doesn't fight the tier's caps.
+     */
+    private suspend fun applyGlobalTier(tier: PowerTier) {
+        transitionMutex.withLock {
+            if (boundPackage != null && !QuickAccessScope.followsGlobal(boundConfig)) return
+            if (autoTdpPackage != null) {
+                stopAutoTdp()
+                clearBoundReassert()
+            }
+            if (tier == PowerTier.CUSTOM) container.repository.restoreCustomValues() else container.repository.applyTier(tier)
+        }
+    }
+
+    /**
+     * Apply a Quick Access per-app edit to the ALREADY-RUNNING foreground game so it takes effect now (the poll
+     * loop only re-binds on a foreground CHANGE). Handles: AutoTDP toggled on/off live; a switch to a power
+     * TIER (stop AutoTDP, apply the tier's caps, hold them); and a live AutoTDP value edit (re-push
+     * target/bias/park + frame cap). Held under [transitionMutex] so it can't race a concurrent foreground
+     * bind/unbind. The pre-game restore snapshot was captured on ENTRY and is left untouched here, so leaving
+     * the game still restores cleanly no matter how many times the mode was switched mid-session.
+     */
+    private suspend fun applyLiveEdit(
+        pkg: String,
+        config: PerAppConfig,
+        action: QuickAccessAction,
+        globalDefault: Boolean,
+    ) {
+        transitionMutex.withLock {
+            if (pkg != boundPackage) return // foreground moved on while we were saving — let the bind path handle it
+            boundConfig = config // update the bound state UNDER the lock — the only writers are here + handleForegroundChange
+            val effectiveOn = QuickAccessPerApp.effectiveAutoTdpOn(config, globalDefault)
+            val running = autoTdpPackage == pkg
+            when {
+                action is QuickAccessAction.ToggleAutoTdp && effectiveOn && !running -> {
+                    clearBoundReassert() // drop any prior tier/Custom cap-hold before AutoTDP takes the clocks
+                    startAutoTdp(pkg, config)
+                }
+                action is QuickAccessAction.ToggleAutoTdp && !effectiveOn && running -> {
+                    // Turned AutoTDP OFF for the running game → stop tuning, reopening the clocks to stock. The
+                    // pre-game snapshot is restored when the game is actually left (the unbind path).
+                    stopAutoTdp()
+                    clearBoundReassert()
+                }
+                action is QuickAccessAction.SetTier -> {
+                    // Live mode switch to a power tier: drop AutoTDP if it was running (reopens the clocks), drop
+                    // any prior cap-hold + locks, apply the tier's caps + governor (+ fan/refresh extras) via the
+                    // SAME path the foreground-bind uses, then hold those caps against the vendor daemon each
+                    // tick. The pre-game snapshot is untouched, so leaving the game restores cleanly.
+                    if (running) stopAutoTdp()
+                    clearBoundReassert()
+                    applyConfig(config)
+                    captureBoundReassertCaps()
+                }
+                action is QuickAccessAction.SetStockMode -> {
+                    // "Stock — don't tune" live: PULSE hands off this game. Stop AutoTDP (reopens the clocks)
+                    // and release any held tier/Custom caps + locks back to stock. The pre-game snapshot still
+                    // restores on exit; the AUTO_OFF binding keeps the game hands-off on future launches.
+                    if (running) stopAutoTdp()
+                    clearBoundReassert()
+                }
+                running -> applyAutoTdpRegulation(pkg, config) // live AutoTDP value edit (fps / bias / park)
+            }
+        }
+    }
+
+    /**
+     * Start/stop the getevent combo-detect loop to match the current state: run it only while the Quick
+     * Access bar is active AND a combo is set, restart it if the combo changed, and cancel it otherwise.
+     */
+    /** Apply screen brightness (0..100) globally via root: disable auto-brightness, set the 0..255 value.
+     *  Two separate commands per the per-node convention (never compound PServer writes); the slider's
+     *  telemetry reconcile is the read-back. */
+    private fun applyBrightnessPercent(percent: Int) {
+        val v = (percent.coerceIn(0, 100) * 255 / 100).coerceIn(1, 255)
+        com.kei.pulse.root.RootSupport.runRootCommand("settings put system screen_brightness_mode 0")
+        com.kei.pulse.root.RootSupport.runRootCommand("settings put system screen_brightness $v")
+    }
+
+    /** Apply media volume (0..100) via AudioManager (no root needed). */
+    private fun applyVolumePercent(percent: Int) {
+        val am = getSystemService<AudioManager>() ?: return
+        val max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+        if (max > 0) am.setStreamVolume(AudioManager.STREAM_MUSIC, percent.coerceIn(0, 100) * max / 100, 0)
+    }
+
+    /** Current screen brightness as 0..100 (manual value), for the System slider; null if unreadable. */
+    private fun readBrightnessPercent(): Int? = try {
+        val v = android.provider.Settings.System.getInt(contentResolver, android.provider.Settings.System.SCREEN_BRIGHTNESS)
+        (v * 100 / 255).coerceIn(0, 100)
+    } catch (e: Exception) { // noqa: BLE001 — Settings read can throw SettingNotFoundException; just show "unknown"
+        null
+    }
+
+    /** Current media volume as 0..100, for the System slider; null if unreadable. */
+    private fun readVolumePercent(): Int? {
+        val am = getSystemService<AudioManager>() ?: return null
+        val max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+        return if (max > 0) (am.getStreamVolume(AudioManager.STREAM_MUSIC) * 100 / max).coerceIn(0, 100) else null
+    }
+
+    private fun ensureComboWatcher(settings: AppSettings, active: Boolean) {
+        val combo = settings.quickAccessCombo
+        val want = active && !combo.isNullOrBlank()
+        if (!want) {
+            comboJob?.cancel()
+            comboJob = null
+            comboWatching = null
+            return
+        }
+        if (comboJob?.isActive == true && comboWatching == combo) return
+        comboJob?.cancel()
+        comboWatching = combo
+        val keys = com.kei.pulse.data.InputComboParser.decode(combo)
+        comboJob = serviceScope.launch {
+            // Stream-capable watcher: the producer script needs the file-based runner (PServer inline
+            // truncation). The action gate keeps the combo in-game-only even though detection stays armed.
+            com.kei.pulse.data.InputComboWatcher(
+                runScript = { contents ->
+                    com.kei.pulse.root.RootSupport.runGeneratedScript(this@ForegroundAppMonitorService, "qa_combo_producer.sh", contents)
+                },
+                fastPoll = { qaComboActionAllowed },
+            ).detect(keys) { if (qaComboActionAllowed) quickAccess.toggle() }
+        }
+    }
+
+    /**
+     * Feed the Quick Access bar its settings REACTIVELY (the DataStore flow emits only on an actual change)
+     * instead of re-pushing a `.first()` snapshot every poll tick. The per-tick snapshot raced the optimistic
+     * update: a tick landing in the ~persist window shoved the OLD value back for a beat (the fan-mode "jumps
+     * back for a second" flicker). The flow only ever moves old→new, so it can never revert an optimistic pick.
+     */
+    private fun ensureQuickAccessSettingsFeed(active: Boolean) {
+        if (!active) {
+            qaSettingsJob?.cancel()
+            qaSettingsJob = null
+            return
+        }
+        if (qaSettingsJob?.isActive == true) return
+        qaSettingsJob = serviceScope.launch {
+            container.settingsStorage.settings.collect { quickAccess.updateSettings(it) }
+        }
+    }
     private val rgbController by lazy { RgbController(applicationContext) }
     private var rgbOn = false
     private var overlayPolicies: List<CpuPolicyInfo> = emptyList()
@@ -125,6 +537,10 @@ class ForegroundAppMonitorService : Service() {
     // Vendor QS-tile coexistence: armed when the managed fan changes, so the override notice fires once per value.
     @Volatile private var fanOverrideNotified = false
     @Volatile private var lastManagedFan: Int? = null
+    // FanArbiter release latch: PULSE normalizes the fan ONCE on a managed→unmanaged edge, then goes hands-off.
+    // Starts TRUE (= never-managed) so a fan PULSE wasn't managing is never touched — a user's deliberate system
+    // tile choice, or a vendor whose boot default isn't Smart, must not be "corrected" at service start.
+    @Volatile private var fanReleasedToVendor = true
     // DIAG (fan investigation): dedupe the per-tick fan-decision log so a steady state logs once, not every poll.
     @Volatile private var lastFanDecisionLog: String? = null
     @Volatile private var lastDriftLogMs = 0L // throttle the fast-loop "vendor re-pinned the duty" diagnostic
@@ -186,6 +602,8 @@ class ForegroundAppMonitorService : Service() {
 
     override fun onDestroy() {
         overlay.hide()
+        quickAccess.hide()
+        comboJob?.cancel()
         // Disable TimeStats off the main thread (it goes through the blocking root shell) so the
         // compositor isn't left recording if the service is torn down while a game is showing.
         Thread { runCatching { fpsReader.stop() } }.start()
@@ -254,13 +672,39 @@ class ForegroundAppMonitorService : Service() {
                 stopSelf()
                 return
             }
-            // The watcher also runs for a standalone overlay or the RP6 RGB LED (no per-app/AutoTDP needed).
-            if ((!perAppEnabled && !hasPerAppConfigs && !settings.autoTdpDefaultEnabled &&
-                    !settings.overlayEnabled && settings.rgbMode == RgbMode.OFF &&
-                    settings.managedFanMode == null) || !hasUsageAccess(this)
-            ) {
+            // Keep the watcher alive only while it has work it can actually do. Global Fan/RGB need no
+            // permission (they never read the foreground); per-app/AutoTDP/OSD need Usage Access. Gating the
+            // whole loop on Usage Access used to silently kill the global Fan/RGB on a fresh install — see
+            // [WatcherActivation], which the boot restart shares so the two can't drift.
+            if (!WatcherActivation.shouldRun(perAppEnabled, hasPerAppConfigs, settings, hasUsageAccess(this))) {
                 stopSelf()
                 return
+            }
+            // TOTAL sleep (the 1.19.6 battery fix): while the screen is off this loop does ABSOLUTELY nothing
+            // per tick — no UsageStats query, no fan math, no temp reads, no RGB writes, no cap re-asserts.
+            // The bare 1 s delay holds no wakelock (a suspended SoC sleeps through it), so wake latency is
+            // ≤1 tick with zero receivers. The WENT_OFF one-shots hand the fan to the vendor's own regulation
+            // (never fan_mode=6 unattended), darken the info-LED, un-park the prime, and kill the combo
+            // producer; the vendor fan service + kernel thermal own any emergency thermals while asleep.
+            val screenOn = getSystemService<android.os.PowerManager>()?.isInteractive != false
+            when (SleepGate.transition(screenWasOn, screenOn)) {
+                SleepGate.Transition.WENT_OFF -> {
+                    try {
+                        onScreenOff(settings)
+                    } catch (c: kotlinx.coroutines.CancellationException) {
+                        throw c
+                    } catch (t: Throwable) {
+                        android.util.Log.e("PulseSleep", "screen-off hand-off failed", t)
+                    }
+                }
+                SleepGate.Transition.WENT_ON ->
+                    android.util.Log.i("PulseSleep", "screen on → resuming full cadence")
+                SleepGate.Transition.NONE -> Unit
+            }
+            screenWasOn = screenOn
+            if (SleepGate.tickWork(screenOn) == SleepGate.TickWork.SKIP) {
+                delay(POLL_INTERVAL_MS)
+                continue
             }
             val foreground = currentForegroundPackage()
             overlayForeground = foreground
@@ -286,11 +730,18 @@ class ForegroundAppMonitorService : Service() {
                 candidatePackage = null
                 candidateConfirmCount = 0
             }
-            tick() // reads telemetry once (when active) and caches it for the draw-tracker + RGB below
-            trackDrawForBoundApp()
-            reassertManagedFan(settings)
-            reassertBoundCaps() // Bug 9: hold a Custom/tier binding's caps against the vendor game-boost daemon
-            updateRgb(settings)
+            try {
+                tick() // reads telemetry once (when active) and caches it for the draw-tracker + RGB below
+                trackDrawForBoundApp()
+                reassertManagedFan(settings)
+                reassertBoundCaps() // Bug 9: hold a Custom/tier binding's caps against the vendor game-boost daemon
+                updateRgb(settings)
+            } catch (c: kotlinx.coroutines.CancellationException) {
+                throw c // never swallow cancellation — serviceScope.cancel() must still stop the loop
+            } catch (t: Throwable) {
+                // One tick's device I/O throwing must NOT silently kill the whole watcher (fan/RGB/AutoTDP/OSD).
+                android.util.Log.e("PulseWatcher", "poll tick work failed", t)
+            }
             delay(POLL_INTERVAL_MS)
         }
     }
@@ -321,8 +772,27 @@ class ForegroundAppMonitorService : Service() {
                 PerformanceOverlay.hasPermission(this) &&
                 !neutralForeground
             val autoActive = autoTdpPackage != null
-            if (!overlayShouldShow && !autoActive) {
+            // Quick Access Bar (experimental): same foreground/permission gating as the OSD, its own toggle.
+            val qaForegroundNeutral = osdTarget == null || isNeutralForeground(osdTarget) || neutralForeground
+            val quickAccessShouldShow = com.kei.pulse.overlay.QuickAccess.shouldShowHandle(
+                enabled = settings.quickAccessEnabled,
+                hasOverlayPermission = QuickAccessOverlay.hasPermission(this),
+                foregroundNeutral = qaForegroundNeutral,
+            )
+            // Combo watcher: armed on enabled+permission alone (NOT on the foreground) so a Settings/home/
+            // screen-off blip doesn't kill it and cost a ~1 s re-arm; the ACTION gate keeps it in-game-only.
+            // Must run BEFORE the idle early-return or a neutral start (boot to home) never arms it.
+            qaComboActionAllowed = quickAccessShouldShow
+            // Screen off ⇒ disarm (kills the producer too): no input can happen, so don't pay any idle cost.
+            val screenOn = getSystemService<android.os.PowerManager>()?.isInteractive != false
+            ensureComboWatcher(
+                settings,
+                active = settings.quickAccessEnabled && QuickAccessOverlay.hasPermission(this) && screenOn,
+            )
+            if (!overlayShouldShow && !autoActive && !quickAccessShouldShow) {
                 if (overlay.isShowing) hideOverlay()
+                if (quickAccess.isShowing) quickAccess.hide()
+                ensureQuickAccessSettingsFeed(false)
                 fpsReader.stop() // nothing needs FPS — ensure TimeStats isn't left recording
                 return
             }
@@ -334,11 +804,43 @@ class ForegroundAppMonitorService : Service() {
             lastActiveLoadPercent = maxOf(telemetry.cpuLoadPercent ?: 0, telemetry.gpuLoadPercent ?: 0)
             val fps = fpsReader.read(osdTarget) // FPS for the OSD target (works for standalone-overlay apps too)
             val auto = if (autoActive) buildAutoReadout(policies, telemetry) else null
+            // Keep the HUD/QA profile banner live: the bound mode can change mid-session (a Quick Access preset
+            // switch, an AutoTDP stop) WITHOUT re-showing the overlay, so recompute the label every tick instead
+            // of only in showOverlay — otherwise the HUD shows a stale profile (Bug 3). Cheap for AutoTDP/tier
+            // bindings (resolveProfileLabel returns before any repository read).
+            if (overlayShouldShow || quickAccessShouldShow) {
+                overlayProfileLabel = resolveProfileLabel(settings)
+            }
+            // Build the overlay stats once (it advances the battery-minutes EMA), then feed both overlays.
+            val stats = if (overlayShouldShow || quickAccessShouldShow) {
+                buildOverlayStats(settings, telemetry, fps, auto, includeSystemLevels = quickAccessShouldShow, policies = policies)
+            } else {
+                null
+            }
             when {
-                overlayShouldShow && !overlay.isShowing -> { showOverlay(settings); feedOverlay(settings, telemetry, fps, auto) }
-                overlayShouldShow -> feedOverlay(settings, telemetry, fps, auto)
+                overlayShouldShow && !overlay.isShowing -> { showOverlay(settings); stats?.let { overlay.update(it) } }
+                overlayShouldShow -> stats?.let { overlay.update(it) }
                 overlay.isShowing -> hideOverlay()
             }
+            // Show the handle unless the user hid it AND has a combo to open it with (else they'd be locked out).
+            val showHandle = settings.quickAccessShowHandle || settings.quickAccessCombo.isNullOrBlank()
+            when {
+                quickAccessShouldShow && !quickAccess.isShowing -> {
+                    quickAccess.show(settings, quickAccessActions)
+                    quickAccess.updateShowHandle(showHandle)
+                    quickAccess.updatePerApp(boundConfig)
+                    stats?.let { quickAccess.update(it) }
+                }
+                quickAccessShouldShow -> {
+                    quickAccess.updateShowHandle(showHandle)
+                    quickAccess.updatePerApp(boundConfig)
+                    stats?.let { quickAccess.update(it) }
+                }
+                quickAccess.isShowing -> quickAccess.hide()
+            }
+            // Settings are fed REACTIVELY (below), not via a per-tick snapshot — the snapshot raced the optimistic
+            // update and shoved a stale value back for a beat (the fan-mode "jumps back for a second" flicker).
+            ensureQuickAccessSettingsFeed(quickAccessShouldShow)
             if (autoActive) stepAutoTdp(policies, telemetry, fps)
         } catch (t: Throwable) {
             android.util.Log.e("PulseOverlay", "overlay/auto tick failed", t)
@@ -369,74 +871,129 @@ class ForegroundAppMonitorService : Service() {
      */
     private suspend fun runCustomFan(settings: AppSettings): Boolean {
         if (!isCustomFanSupported()) return false
-        // Writing fan_mode=6 RESETS the Odin's duty to a ~50% mode-init default, so pin our current intended
-        // duty in the SAME command (read-first → only on drift). Also beats the QS fan tile.
-        val intendedDuty = FanCurve.percentToDuty(fanCurveController.appliedPercent, fanCurveController.period)
-        fanController.ensureManualMode(intendedDuty)
         val t = tickTelemetry ?: telemetryReader.read(ensurePolicies())
         fanCurveController.slewPerSecond = settings.fanResponseStep
         // Smooth the SoC temp (EMA) before targeting so ±1–2°C sensor noise doesn't wiggle the duty.
         val rawTemp = maxOf(t.cpuTempC ?: 0, t.gpuTempC ?: 0)
         val sm = smoothedFanTempC?.let { it * 0.6f + rawTemp * 0.4f } ?: rawTemp.toFloat()
         smoothedFanTempC = sm
-        if (settings.fanSmartEnabled) {
-            // During AutoTDP, cascade the fan BELOW the clock-trim ceiling so it spins up first (buys GPU
-            // clocks on a hot AAA game) instead of the clocks throttling while the fan idles. Otherwise the
-            // user's manual target.
+
+        // The fan's wanted duty % for this temp (PI when "Hold Target Temp", else the spline curve). During
+        // AutoTDP, cascade the fan BELOW the clock-trim ceiling so it spins up first (buys GPU clocks on a hot
+        // AAA game) instead of the clocks throttling while the fan idles. Otherwise the user's target.
+        val effectiveCurve = settings.fanCurve.shiftedBy(settings.fanBias)
+        val targetPercent: Int = if (settings.fanSmartEnabled) {
             val targetC = if (autoTdpPackage != null)
                 AutoTuneController.autoTdpFanTargetC(settings.fanTargetTempC, autoTune.thermalCeilingC())
             else settings.fanTargetTempC
-            val duty = fanTempController.update(sm.roundToInt(), targetC, POLL_INTERVAL_MS / 1000.0)
-            fanCurveController.setTargetPercent(duty)
+            fanTempController.update(sm.roundToInt(), targetC, POLL_INTERVAL_MS / 1000.0)
         } else {
-            fanCurveController.curve = settings.fanCurve.shiftedBy(settings.fanBias)
+            effectiveCurve.percentFor(sm.roundToInt())
+        }
+
+        // IDLE-ON-SMART (global Custom fan only — NOT during AutoTDP, where the chip is under game load and the
+        // fan↔clock cascade wants the fan ready). In manual passthrough (fan_mode=6) the vendor stops
+        // regulating, so a dead PULSE strands the duty at the vendor's ~50% reset (loud). At idle the loop only
+        // wants the floor, where vendor Smart is just as quiet AND death-safe — so hand it to Smart; engage
+        // Custom the instant active cooling is needed (target above the floor). See [CustomFanGate].
+        if (autoTdpPackage == null) {
+            customFanGate = CustomFanGate.next(customFanGate, sm.roundToInt(), targetPercent, FanCurve.MIN_PERCENT)
+            if (!customFanGate.active) {
+                if (customFanRunning) {
+                    stopCustomFan(restoreVendor = true) // stop driving + hand the fan back to vendor Smart
+                } else if (fanController.readMode() != FanController.SMART) {
+                    // Fresh/idle and the fan is NOT on Smart (e.g. a stranded fan_mode=6 from a prior kill) —
+                    // restore Smart so the fan is quiet and vendor-regulated.
+                    serviceScope.launch(Dispatchers.IO) { fanController.setMode(FanController.SMART) }
+                }
+                lastManagedFan = FanController.SMART
+                fanLog("CUSTOM idle → vendor Smart (target=$targetPercent floor=${FanCurve.MIN_PERCENT} temp=${sm.roundToInt()} idle=${customFanGate.idleTicks})")
+                return true
+            }
+        }
+
+        // Active cooling: drive the Custom fan. Writing fan_mode=6 RESETS the Odin's duty to a ~50% mode-init
+        // default, so pin our current intended duty in the SAME command (read-first → only on drift).
+        val intendedDuty = FanCurve.percentToDuty(fanCurveController.appliedPercent, fanCurveController.period)
+        fanController.ensureManualMode(intendedDuty)
+        if (settings.fanSmartEnabled) {
+            fanCurveController.setTargetPercent(targetPercent)
+        } else {
+            fanCurveController.curve = effectiveCurve
             fanCurveController.setTarget(sm.roundToInt())
         }
         customFanRunning = true
         ensureFanReassertLoop()
         lastManagedFan = FanController.CUSTOM
-        fanLog("CUSTOM fan running (autoTdp=${autoTdpPackage != null} smart=${settings.fanSmartEnabled} temp=${sm.roundToInt()} applied=${fanCurveController.appliedPercent}% target=${settings.fanTargetTempC})")
+        fanLog("CUSTOM fan running (autoTdp=${autoTdpPackage != null} smart=${settings.fanSmartEnabled} temp=${sm.roundToInt()} applied=${fanCurveController.appliedPercent}% target=$targetPercent)")
         return true
     }
 
     private suspend fun reassertManagedFan(settings: AppSettings) {
         // Autocalibrate is sweeping the duty node directly — stand down so we don't fight its writes.
         if (FanCurveController.externalControlActive) return
-        // AutoTDP owns the clocks/governor. The FAN follows the user's mode: if they picked Custom (and it's
-        // supported), keep driving the quiet closed-loop Custom fan DURING AutoTDP — AutoTDP's thermal ceiling
-        // cools via clocks, so the fan PI idles ⇒ quiet (vs. vendor Smart ramping hard). Otherwise stand down
-        // to the vendor Smart that startAutoTdp set.
-        if (autoTdpPackage != null) {
-            if (settings.managedFanMode == FanController.CUSTOM && runCustomFan(settings)) return
-            stopCustomFan(); return
-        }
-        // The fan PULSE wants: a foreground app's per-app fan takes priority, else the global Fan-card mode.
-        var desired = boundConfig?.fanMode ?: settings.managedFanMode
-        val neutralFg = isNeutralForeground(overlayForeground)
-        if (desired == null) {
-            fanLog("desired=null → RELEASE to vendor (neutralFg=$neutralFg boundFan=${boundConfig?.fanMode} managed=${settings.managedFanMode})")
-            lastManagedFan = null; stopCustomFan(restoreVendor = true); return
-        }
-
-        // Custom fan curve (Odin 3 / RP6 / Thor — all expose the gpio5_pwm2 node): PULSE puts the vendor in
-        // manual passthrough then drives the PWM duty straight from the user's temp→% curve, slewing smoothly.
-        // On any device without the node Custom falls back to Smart so we never sit on a phantom mode. Switching
-        // to any other mode calls stopCustomFan() and the caller sets that mode, cleanly retaking the fan.
-        if (desired == FanController.CUSTOM) {
-            if (runCustomFan(settings)) return
-            desired = FanController.SMART // unsupported device: don't sit on a phantom Custom mode
-        }
-        stopCustomFan()
-
-        if (desired != lastManagedFan) { lastManagedFan = desired; fanOverrideNotified = false } // re-arm on change
-        val live = fanController.readMode() ?: run { fanLog("desired=$desired live=READ-FAILED (neutralFg=$neutralFg)"); return }
-        fanLog("desired=$desired live=$live neutralFg=$neutralFg boundFan=${boundConfig?.fanMode} managed=${settings.managedFanMode} ${if (live == desired) "HELD" else "WILL-REWRITE"}")
-        if (live == desired) return
-        android.util.Log.d("PulseFan", "system Fan tile drifted fan_mode=$live, want=$desired — re-applying")
-        fanController.setMode(desired)
-        if (!fanOverrideNotified && container.perAppConfigStorage.switchNotices.first()) {
-            fanOverrideNotified = true
-            showToast("PULSE · system Fan tile changed the fan — re-applied ${FanController.labelFor(desired)}")
+        val autoActive = autoTdpPackage != null
+        val boundFan = boundConfig?.fanMode
+        // ONLY the GLOBAL Fan card arms the release edge. A bound per-app fan must NOT (P5): its hand-back is
+        // owned by the game-exit restoreSnapshot, which restores the user's PRE-GAME mode — an armed edge would
+        // then "normalize" that restored mode to Smart one tick later, stomping the restore (e.g. an ambient
+        // vendor-tile Sport). AutoTDP likewise restores via snapshot. The edge stays as the safety net for a
+        // future global-fan "release" option (no UI path writes managedFanMode=null today).
+        if (settings.managedFanMode != null) fanReleasedToVendor = false
+        // The DECISION lives in the pure, truth-table-tested FanArbiter (the imperative version's release path
+        // silently assumed the fan was already at the vendor default — turning the Fan card OFF after managing
+        // a vendor mode left that mode stuck forever). This is the thin executor.
+        val action = FanArbiter.decide(
+            autoTdpActive = autoActive,
+            boundFanMode = boundFan,
+            managedFanMode = settings.managedFanMode,
+            customFanSupported = isCustomFanSupported(),
+            releaseLatched = fanReleasedToVendor,
+            releaseMode = DeviceProfiles.forSoc(container.repository.socModel()).fanReleaseMode,
+            readLiveMode = { fanController.readMode() },
+        )
+        fanLog("arbiter=$action auto=$autoActive bound=$boundFan managed=${settings.managedFanMode} latched=$fanReleasedToVendor")
+        when (action) {
+            is FanAction.RunCustomLoop -> {
+                // Custom fan (all 3 devices expose gpio5_pwm2): manual passthrough + PULSE drives the duty.
+                // If the node vanished at runtime, never sit on a phantom Custom mode — fall back to Smart.
+                if (!runCustomFan(settings)) {
+                    stopCustomFan()
+                    fanController.setMode(FanController.SMART)
+                }
+            }
+            is FanAction.SetVendorMode -> {
+                stopCustomFan()
+                if (action.mode != lastManagedFan) { lastManagedFan = action.mode; fanOverrideNotified = false } // re-arm on change
+                android.util.Log.d("PulseFan", "fan_mode drifted, want=${action.mode} — re-applying")
+                fanController.setMode(action.mode)
+                if (!fanOverrideNotified && container.perAppConfigStorage.switchNotices.first()) {
+                    fanOverrideNotified = true
+                    showToast("PULSE · system Fan tile changed the fan — re-applied ${FanController.labelFor(action.mode)}")
+                }
+            }
+            is FanAction.ReleaseToVendor -> {
+                // Managed→unmanaged edge with the fan left on a PULSE-managed mode (or Custom's manual
+                // passthrough): hand it to the device's release mode ONCE, then stay hands-off (latch).
+                stopCustomFan()
+                lastManagedFan = null
+                fanReleasedToVendor = true
+                android.util.Log.d("PulseFan", "release edge — normalizing fan to ${FanController.labelFor(action.mode)}")
+                fanController.setMode(action.mode)
+            }
+            FanAction.None -> {
+                // Held / AutoTDP-owns / latched / unreadable: make sure no stale Custom loop keeps driving the
+                // duty, and latch a completed release. On the unmanaged path, restoreVendor keeps the old safety
+                // net: even if the mode read failed, a running Custom loop still hands the fan back to Smart
+                // (never stranded in manual passthrough with no vendor thermal regulation).
+                if (!autoActive && boundFan == null && settings.managedFanMode == null) {
+                    stopCustomFan(restoreVendor = true)
+                    lastManagedFan = null
+                    fanReleasedToVendor = true
+                } else {
+                    stopCustomFan()
+                }
+            }
         }
     }
 
@@ -446,7 +1003,53 @@ class ForegroundAppMonitorService : Service() {
      * curve — otherwise it'd be stranded in manual passthrough with no thermal regulation. When switching to
      * another vendor mode the caller sets that mode itself, so the restore is skipped.
      */
+    /**
+     * The TOTAL-sleep WENT_OFF one-shots — hand every actively-driven control back to the device before the
+     * loop goes silent. Everything here reuses an existing, verified path; nothing new is invented:
+     *  1. FAN: if PULSE is driving the Custom loop (fan_mode=6), exit to vendor Smart via the hardware-verified
+     *     stop path (also stops the 120 ms duty loop ⇒ zero fan I/O asleep). A managed VENDOR mode gets NO
+     *     write — it's already vendor-regulated at zero PULSE cost, and the wake tick's drift re-assert
+     *     restores management (skipping the write avoids a mode bounce at every screen-off).
+     *  2. RGB: a lit info-LED burns ~50-100 mW all night — write black through the normal pipeline. The color
+     *     CHANGE also makes the wake repaint immediate (writeColorPair's change detection), so no timer reset
+     *     is needed; Battery/Heat recompute on the first awake tick, Manual re-writes its color likewise.
+     *  3. AutoTDP: stepping pauses entirely while asleep — run the rendering-stopped safety ONCE (re-online a
+     *     parked prime, re-arm the settle gate) so cores are never left offline unattended and wake re-decides
+     *     parking from scratch. Session identity/bound snapshot/learned model untouched.
+     *  4. COMBO: tick() (which normally arms/disarms the watcher) won't run while asleep — disarm now so the
+     *     detached getevent producer is killed instead of capturing (and costing polls) all night.
+     */
+    private suspend fun onScreenOff(settings: AppSettings) {
+        // Each hand-off is INDEPENDENTLY guarded so a failure in one never skips the others — most importantly
+        // the combo disarm, which won't refire (the WENT_OFF edge is consumed once). The realistic throw
+        // surface is ~nil today (runRootCommand is Result.getOrNull, the fan write is on its own scope), so
+        // this is belt-and-suspenders; CancellationException still propagates so serviceScope.cancel() stops
+        // the loop. Fan is first (a stranded fan_mode=6 is the only dangerous strand), combo disarm last.
+        val fanReleased = customFanRunning
+        guardedOneShot("fan release") { if (customFanRunning) stopCustomFan(restoreVendor = true) }
+        guardedOneShot("rgb dark") { if (settings.rgbMode != RgbMode.OFF) rgbController.setColor(0, 0, 0) } // self-gated
+        val autoPaused = autoTdpPackage != null
+        guardedOneShot("autotdp pause") { if (autoPaused) autoTune.pauseForScreenOff(ensurePolicies()) }
+        guardedOneShot("combo disarm") { ensureComboWatcher(settings, active = false) }
+        android.util.Log.i(
+            "PulseSleep",
+            "screen off → total sleep (fanReleased=$fanReleased rgbDark=${settings.rgbMode != RgbMode.OFF} autoTdpPaused=$autoPaused)",
+        )
+    }
+
+    /** Run one screen-off hand-off step, isolating a failure to that step (never swallow cancellation). */
+    private inline fun guardedOneShot(label: String, block: () -> Unit) {
+        try {
+            block()
+        } catch (c: kotlinx.coroutines.CancellationException) {
+            throw c
+        } catch (t: Throwable) {
+            android.util.Log.e("PulseSleep", "screen-off one-shot '$label' failed", t)
+        }
+    }
+
     private fun stopCustomFan(restoreVendor: Boolean = false) {
+        customFanGate = CustomFanState() // re-arm the idle-on-Smart gate for the next Custom session
         if (customFanRunning) {
             customFanRunning = false
             fanLoopJob?.cancel()
@@ -473,27 +1076,33 @@ class ForegroundAppMonitorService : Service() {
         fanLoopJob = serviceScope.launch {
             var sinceSlewMs = 0L
             while (customFanRunning) {
-                // Pause everything while autocalibrate drives the duty directly (avoids a write race).
-                if (!FanCurveController.externalControlActive) {
-                    // Re-check the live duty every FAN_RECHECK_MS. The Odin vendor slams the duty to ~50% on
-                    // game foreground-transitions even in manual passthrough (firmware game-detection we can't
-                    // disable); catch it and re-pin OUR value immediately so the rev is inaudible.
-                    val live = FanCurveController.readDutyFromDevice()
-                    if (fanCurveController.reconcileActualDuty(live)) {
-                        fanCurveController.reassertCurrentDuty()
-                        val now = android.os.SystemClock.elapsedRealtime()
-                        if (now - lastDriftLogMs > 800) {
-                            lastDriftLogMs = now
-                            android.util.Log.d("PulseFan", "fast-loop drift: node=$live fan_mode=${fanController.readMode()} re-pinned=${fanCurveController.appliedPercent}%")
+                try {
+                    // Pause everything while autocalibrate drives the duty directly (avoids a write race).
+                    if (!FanCurveController.externalControlActive) {
+                        // Re-check the live duty every FAN_RECHECK_MS. The Odin vendor slams the duty to ~50% on
+                        // game foreground-transitions even in manual passthrough (firmware game-detection we can't
+                        // disable); catch it and re-pin OUR value immediately so the rev is inaudible.
+                        val live = FanCurveController.readDutyFromDevice()
+                        if (fanCurveController.reconcileActualDuty(live)) {
+                            fanCurveController.reassertCurrentDuty()
+                            val now = android.os.SystemClock.elapsedRealtime()
+                            if (now - lastDriftLogMs > 800) {
+                                lastDriftLogMs = now
+                                android.util.Log.d("PulseFan", "fast-loop drift: node=$live fan_mode=${fanController.readMode()} re-pinned=${fanCurveController.appliedPercent}%")
+                            }
+                        }
+                        // Advance the smooth ramp on its own slower cadence so the fan-response-step tuning is
+                        // unchanged by the faster duty re-check above.
+                        sinceSlewMs += FAN_RECHECK_MS
+                        if (sinceSlewMs >= FAN_SLEW_MS) {
+                            fanCurveController.slew(sinceSlewMs)
+                            sinceSlewMs = 0L
                         }
                     }
-                    // Advance the smooth ramp on its own slower cadence so the fan-response-step tuning is
-                    // unchanged by the faster duty re-check above.
-                    sinceSlewMs += FAN_RECHECK_MS
-                    if (sinceSlewMs >= FAN_SLEW_MS) {
-                        fanCurveController.slew(sinceSlewMs)
-                        sinceSlewMs = 0L
-                    }
+                } catch (c: kotlinx.coroutines.CancellationException) {
+                    throw c // never swallow cancellation — the loop must stop when the scope is cancelled
+                } catch (t: Throwable) {
+                    android.util.Log.e("PulseFan", "fan reassert loop iteration failed", t)
                 }
                 delay(FAN_RECHECK_MS)
             }
@@ -586,7 +1195,14 @@ class ForegroundAppMonitorService : Service() {
 
     /** CPU+GPU policies, loaded once and reused for telemetry, the overlay, and AutoTDP. */
     private suspend fun ensurePolicies(): List<CpuPolicyInfo> {
-        if (overlayPolicies.isEmpty()) overlayPolicies = container.repository.currentPolicies()
+        if (overlayPolicies.isEmpty()) {
+            // Cache only a NON-empty read: a transient empty result (e.g. PServer cold on boot) must not
+            // latch an empty list for the service's whole life, which would run telemetry/overlay/AutoTDP
+            // blind. Returning empty here is safe — every consumer null-checks; the next call retries.
+            val loaded = container.repository.currentPolicies()
+            if (loaded.isEmpty()) return loaded
+            overlayPolicies = loaded
+        }
         return overlayPolicies
     }
 
@@ -628,12 +1244,14 @@ class ForegroundAppMonitorService : Service() {
             .firstOrNull { it.id == binding }?.name ?: settings.activeTierLabel
     }
 
-    private fun feedOverlay(
+    private fun buildOverlayStats(
         settings: AppSettings,
         telemetry: TelemetrySnapshot,
         fps: FpsReader.FpsSample?,
         auto: AutoTdpReadout?,
-    ) {
+        includeSystemLevels: Boolean = false,
+        policies: List<CpuPolicyInfo> = emptyList(),
+    ): OverlayStats {
         val (powerW, isCharging) = overlayPower(telemetry)
         // Battery readout: on battery = time-LEFT from the smoothed draw; plugged in = time-to-FULL from the
         // smoothed charge rate (= powerW while charging). Capacity is read once. Unknown/tiny cases → null → "—".
@@ -649,18 +1267,23 @@ class ForegroundAppMonitorService : Service() {
         overlayMinutesDischarging = telemetry.isDischarging
         overlayMinutesEma = smoothMinutes(overlayMinutesEma, rawMinutes, MINUTES_SMOOTH_ALPHA)
         val minutesLeft = displayMinutes(overlayMinutesEma)
-        overlay.update(
-            OverlayStats(
-                telemetry = telemetry,
-                fps = fps,
-                sessionElapsedMs = sessionElapsedMs(),
-                socModel = overlaySoc,
-                profileLabel = overlayProfileLabel,
-                powerDrawW = powerW,
-                powerIsCharging = isCharging,
-                minutesLeft = minutesLeft,
-                autoTdp = auto,
-            ),
+        return OverlayStats(
+            telemetry = telemetry,
+            fps = fps,
+            sessionElapsedMs = sessionElapsedMs(),
+            socModel = overlaySoc,
+            profileLabel = overlayProfileLabel,
+            powerDrawW = powerW,
+            powerIsCharging = isCharging,
+            minutesLeft = minutesLeft,
+            autoTdp = auto,
+            // Only the Quick Access System sliders consume these — don't pay the reads on OSD-only sessions.
+            brightnessPercent = if (includeSystemLevels) readBrightnessPercent() else null,
+            volumePercent = if (includeSystemLevels) readVolumePercent() else null,
+            // GPU cap for the bar's Custom stepper: the LIVE readback (one root read/tick while the bar shows)
+            // is the source of truth, so the stepper can never show a cap the device isn't actually holding.
+            gpuLevels = if (includeSystemLevels) policies.firstOrNull { it.isGpu }?.supportedFrequencies else null,
+            gpuCapKhz = if (includeSystemLevels) container.repository.readCurrentGpuCapKhz() else null,
         )
     }
 
@@ -720,16 +1343,75 @@ class ForegroundAppMonitorService : Service() {
     private val systemUiPackages = setOf("com.android.systemui", "com.android.settings")
 
     /**
+     * On-screen keyboards (IMEs). When a text field is focused — e.g. in Android Settings — the IME becomes the
+     * latest foreground app, and it isn't one of the shell packages above, so the OSD used to pop up over the
+     * keyboard. Treat every enabled keyboard as neutral so the OSD stays hidden whenever one is up. Cached;
+     * re-resolved while empty (same pattern as [homePackages]).
+     */
+    private var cachedImePackages: Set<String> = emptySet()
+    private fun imePackages(): Set<String> {
+        if (cachedImePackages.isNotEmpty()) return cachedImePackages
+        val resolved = runCatching {
+            getSystemService<InputMethodManager>()?.enabledInputMethodList
+                ?.mapNotNull { it.packageName }?.toSet()
+        }.getOrNull().orEmpty()
+        if (resolved.isNotEmpty()) cachedImePackages = resolved
+        return resolved
+    }
+
+    /**
      * The foreground is "neutral" — PULSE itself, the home screen, or an Android shell surface — so the global
      * default never tunes it and the OSD stays hidden. (Per-app bindings are unaffected: they only ever engage
      * on their named app.)
      */
     private fun isNeutralForeground(pkg: String?): Boolean =
         uiInForeground || // PULSE's own UI is on screen (even if a keyboard/dialog is the latest resumed pkg)
-            (pkg != null && (pkg == packageName || pkg in systemUiPackages || pkg in homePackages()))
+            (pkg != null && ForegroundClassifier.isNeutralPackage(
+                pkg, packageName, systemUiPackages, homePackages(), imePackages()))
 
-    /** Global AutoTDP tunes any foreground app except PULSE itself and the home screen. */
-    private fun isGlobalAutoTdpTarget(pkg: String): Boolean = !isNeutralForeground(pkg)
+    /** Global AutoTDP tunes any foreground app except PULSE/home/Settings — and known BENCHMARKS (the pure,
+     *  tested [AutoTdpEngagement] policy: tuning mid-benchmark tanks the score; the device is being measured). */
+    private fun isGlobalAutoTdpTarget(pkg: String): Boolean =
+        AutoTdpEngagement.shouldEngage(pkg, neutralForeground = isNeutralForeground(pkg))
+
+    /**
+     * Set the live AutoTDP regulation knobs — target FPS / aggressive-park / efficiency-smoothness bias /
+     * Odin-only watt cap — and enforce the frame cap, all from [config] (per-app override, else the global
+     * default). Shared by [startAutoTdp] and the live Quick Access edit path so a per-app change to the
+     * already-running game takes effect without an alt-tab.
+     */
+    private suspend fun applyAutoTdpRegulation(pkg: String, config: PerAppConfig?) {
+        val settings = container.settingsStorage.settings.first()
+        val soc = container.repository.socModel()
+        // Snap to this SoC's valid options so a legacy 45/0 or an Odin value carried onto an 8 Gen 2 can't slip through.
+        val target = PerAppConfig.snapFpsTarget(
+            config?.fpsTarget ?: settings.autoTdpFpsTarget,
+            PerAppConfig.fpsTargetsFor(soc),
+        )
+        autoTune.targetFps = target
+        // Per-app parking / bias override the global default (per-app-first).
+        autoTune.aggressivePark = config?.aggressivePark ?: settings.autoTdpAggressivePark
+        autoTune.bias = AutoTdpBias.resolve(config?.bias, settings.autoTdpBias)
+        // Odin-only watt cap + prime-walled settle. The SD 8 Gen 2 (Thor/RP6) has a scaling prime + different
+        // chassis, so it just chases the target there (the thermal ceiling stays as the universal backstop).
+        autoTune.wattCapAndSettleEnabled = AutoTuneController.appliesOdinPowerTuning(soc)
+        // Enforce the target. Use the Game Mode fps cap (panel held at max refresh, 120 Hz, for latency) only
+        // when the SoC honors it AND the target evenly divides 120 — 30/40/60/120 cap cleanly. 90 can't be
+        // frame-paced at 120 Hz (floors to 60), and the 8 Gen 2 (Thor/RP6) doesn't honor the cap at all; both
+        // take the refresh-rate path (the panel rate IS the cap). The clock loop holds [target].
+        val maxRefresh = RefreshRateController.RATES.max()
+        if (PerAppConfig.useGameModeCap(soc, target, maxRefresh)) {
+            refreshRateController.setRate(maxRefresh)
+            val applied = FrameLimiter.setCap(pkg, target)
+            // Confirm the firmware honored the value (not floored) — read it back in the diagnostic log.
+            if (AUTO_DEBUG) {
+                android.util.Log.d("PulseAutoTdp", "FRAME-CAP requested=$target applied=[${applied?.trim()}]")
+            }
+        } else {
+            FrameLimiter.clear(pkg)
+            refreshRateController.setRate(target)
+        }
+    }
 
     /**
      * Begin an AutoTDP session for [pkg]: snapshot the pre-game state (caps + fan + governor) when
@@ -761,34 +1443,9 @@ class ForegroundAppMonitorService : Service() {
         // Warm-start from this app's last converged caps so the loop fine-tunes instead of
         // re-discovering from full clocks every launch (gets quicker the more it's played).
         container.settingsStorage.loadAutoTdpCaps(pkg)?.let { autoTune.warmStart(policies, it) }
-        // Regulate to this app's FPS target (per-app override, else the global default), snapped to this
-        // SoC's valid options so a legacy 45/0 or an Odin value carried onto an 8 Gen 2 can't slip through.
-        val soc = container.repository.socModel()
-        val target = PerAppConfig.snapFpsTarget(
-            config?.fpsTarget ?: settings.autoTdpFpsTarget,
-            PerAppConfig.fpsTargetsFor(soc),
-        )
-        autoTune.targetFps = target
-        // Per-app parking overrides the global default (parking is part of the AutoTDP algorithm).
-        autoTune.aggressivePark = config?.aggressivePark ?: settings.autoTdpAggressivePark
-        // Efficiency↔smoothness lean: per-app overrides the global default (per-app-first).
-        autoTune.bias = AutoTdpBias.resolve(config?.bias, settings.autoTdpBias)
-        // Enforce the target. Use the Game Mode fps cap (panel held at max refresh, 120 Hz, for latency)
-        // only when the SoC honors it AND the target evenly divides 120 — 30/40/60/120 cap cleanly. 90
-        // can't be frame-paced at 120 Hz (floors to 60), and the 8 Gen 2 (Thor/RP6) doesn't honor the cap
-        // at all; both take the refresh-rate path (the panel rate IS the cap). The clock loop holds [target].
-        val maxRefresh = RefreshRateController.RATES.max()
-        if (PerAppConfig.useGameModeCap(soc, target, maxRefresh)) {
-            refreshRateController.setRate(maxRefresh)
-            val applied = FrameLimiter.setCap(pkg, target)
-            // Confirm the firmware honored the value (not floored) — read it back in the diagnostic log.
-            if (AUTO_DEBUG) {
-                android.util.Log.d("PulseAutoTdp", "FRAME-CAP requested=$target applied=[${applied?.trim()}]")
-            }
-        } else {
-            FrameLimiter.clear(pkg)
-            refreshRateController.setRate(target)
-        }
+        // Regulate to this app's FPS target / bias / parking + enforce the frame cap (shared with the live QA
+        // edit path so a per-app change to the running game takes effect immediately).
+        applyAutoTdpRegulation(pkg, config)
         autoTdpPackage = pkg
         autoTdpTick = 0
         // Fan: force vendor Smart UNLESS the user runs the Custom fan — then reassertManagedFan keeps driving
@@ -822,6 +1479,8 @@ class ForegroundAppMonitorService : Service() {
         }
         autoTdpPackage = null
         autoTdpTick = 0
+        // Re-arm the one-shot replay session header (AUTOTDP-SESSION) so the next session re-emits it.
+        autoTdpLogTick = 0
     }
 
     /**
@@ -859,7 +1518,7 @@ class ForegroundAppMonitorService : Service() {
             // transition stutter while the average rate still reads on-target.
             worstFrameMs = fps?.worstFrameTimeMs,
         )
-        if (AUTO_DEBUG) logAutoTdp(policies, telemetry, fps, drawW, decision)
+        if (AUTO_DEBUG) logAutoTdp(policies, telemetry, fps, drawW, decision, primePeak)
         // Counter the vendor game-boost perflock that re-pins the prime: re-assert its cap EVERY tick (we
         // otherwise only write on TRIM/RAISE, so perfd wins every HOLD stretch). If racing it still loses,
         // the log's mn/mx[prime] stays 3283/4320 and parking is the answer.
@@ -937,7 +1596,23 @@ class ForegroundAppMonitorService : Service() {
         fps: FpsReader.FpsSample?,
         drawW: Float?,
         decision: AutoTuneController.Decision,
+        primePeak: Int?,
     ) {
+        // Session header for the replay harness: the controller config + cluster layout the per-tick line
+        // can't carry (bias / Odin watt-cap gate are session-scoped; policies are static). Lets a saved
+        // capture be re-run through the real controller off-device. Emitted at tick 0 (re-armed each session
+        // in stopAutoTdp) AND every 15 ticks, so a capture started mid-session — or one whose opening ticks
+        // were trimmed from the logcat ring buffer — still contains a header.
+        if (autoTdpLogTick % 15 == 0) {
+            val polStr = policies.joinToString(";") { p ->
+                "${p.id}:${p.selectableMaxFreq}:${p.cpuIds.joinToString(",")}"
+            }
+            android.util.Log.d(
+                "PulseAutoTdp",
+                "AUTOTDP-SESSION tgt=${autoTune.targetFps} bias=${autoTune.bias} " +
+                    "wattCap=${if (autoTune.wattCapAndSettleEnabled) 1 else 0} policies=$polStr",
+            )
+        }
         val caps = autoTune.caps
         val capsStr = policies.joinToString(",") { "${it.id}:${caps[it.id] ?: 100}" }
         val curStr = policies.filterNot { it.isGpu }
@@ -956,15 +1631,18 @@ class ForegroundAppMonitorService : Service() {
         }
         android.util.Log.d(
             "PulseAutoTdp",
-            "tgt=${autoTune.targetFps} fps=${fps?.fps?.let { String.format("%.1f", it) } ?: "-"} " +
-                "jank=${fps?.jankFrames ?: 0} tail=${fps?.worstFrameTimeMs?.let { String.format("%.0f", it) } ?: "-"}ms " +
+            "tgt=${autoTune.targetFps} fps=${fps?.fps?.let { String.format(java.util.Locale.US, "%.1f", it) } ?: "-"} " +
+                "jank=${fps?.jankFrames ?: 0} tail=${fps?.worstFrameTimeMs?.let { String.format(java.util.Locale.US, "%.0f", it) } ?: "-"}ms " +
                 "act=${decision.action} bn=${autoTune.bottleneckLabel} " +
                 "cpuB=${telemetry.cpuLoadPercent ?: -1} cpuPk=${telemetry.cpuCoreLoadsPercent.maxOrNull() ?: -1} " +
+                // primePk = the PRIME-cluster peak (step()'s cpuPeakPercent / park guard); cpuPk above is the
+                // ALL-core peak (cpuCorePeakPercent). Both are distinct step() inputs — replay needs each.
+                "primePk=${primePeak ?: -1} " +
                 "io=${telemetry.cpuIowaitPercent ?: -1} " +
                 "gpuB=${telemetry.gpuBusyPercent ?: -1} gpuL=${telemetry.gpuLoadPercent ?: -1} " +
                 "capped=${autoTune.stalledDomainCount} " +
                 "prk=${if (autoTune.isPrimeParked) 1 else 0} stl=${if (autoTune.isPrimeWalled) 1 else 0} " +
-                "draw=${drawW?.let { String.format("%.2f", it) } ?: "-"}W " +
+                "draw=${drawW?.let { String.format(java.util.Locale.US, "%.2f", it) } ?: "-"}W " +
                 "cT=${telemetry.cpuTempC} gT=${telemetry.gpuTempC} " +
                 "caps%[$capsStr] curMHz[$curStr]$mmStr gpu=${telemetry.gpuMhz} " +
                 "gcap=${telemetry.gpuCeilingMhz ?: -1}[${telemetry.gpuMaxLevel ?: -1}/${telemetry.gpuMinLevel ?: -1}] " +
@@ -1086,18 +1764,30 @@ class ForegroundAppMonitorService : Service() {
         return latest
     }
 
-    private suspend fun handleForegroundChange(foreground: String) {
+    /**
+     * [force] (scope-commit path only): re-run the bind decision even though [foreground] is ALREADY the
+     * bound package — a mid-game profile delete/create must take effect now, not on the next alt-tab. The
+     * bind branch's stopAutoTdp/clearBoundReassert sequencing already makes a same-package rebind safe, and
+     * firstEntry stays false so the original pre-game snapshot is preserved.
+     */
+    private suspend fun handleForegroundChange(foreground: String, force: Boolean = false) {
         transitionMutex.withLock {
             val config = container.perAppConfigStorage.configs.first()
                 .firstOrNull { it.packageName == foreground }
             // Global default: AutoTDP also engages for any foreground app (except PULSE + the home
             // screen) when the user turned it on — games, emulators, and media alike.
+            // An app explicitly toggled to AUTO_OFF runs NO AutoTDP — it must behave like a neutral app even
+            // when the global default is on (QA bug #1 device half). An AUTO_OFF config still engages only if it
+            // carries a fan/refresh extra (applyConfig applies those; its AUTO_OFF "profile" is skipped there).
+            val explicitlyOff = config != null && PerAppConfig.isAutoOff(config.profileBinding)
+            val configEngages = config != null &&
+                !(explicitlyOff && config.fanMode == null && config.refreshRateHz == null)
             val autoDefault = config == null &&
                 container.settingsStorage.settings.first().autoTdpDefaultEnabled &&
                 isGlobalAutoTdpTarget(foreground)
-            val engages = config != null || autoDefault
+            val engages = configEngages || autoDefault
             when {
-                engages && boundPackage != foreground -> {
+                engages && (boundPackage != foreground || force) -> {
                     // Release any prior AutoTDP session first (e.g. switching directly between apps).
                     stopAutoTdp()
                     clearBoundReassert() // drop any prior Custom/tier cap-hold + its locks before re-binding
@@ -1110,6 +1800,16 @@ class ForegroundAppMonitorService : Service() {
                             // apps keeps the original pre-launch snapshot.
                             if (firstEntry) snapshotCurrentState(config)
                             applyConfig(config)
+                            // GOVERNOR LEAK fix: AutoTDP forces Balanced and tiers/Custom set their own, but a
+                            // DISPLAY-PROFILE (incl. Stock) or AUTO_OFF/extras-only binding applies clocks only —
+                            // so on a DIRECT game→game switch it silently inherited the previous session's
+                            // governor (a benchmark bound to "Stock" ran on AutoTDP's leftover Balanced; the
+                            // field-reported ~8% score hit). Restore the captured pre-game governor for those.
+                            if (!firstEntry && PerAppConfig.tierFromBinding(config.profileBinding) == null) {
+                                container.perAppConfigStorage.restoreState.first()?.governor?.let {
+                                    governorController.setGovernorRaw(ensurePolicies(), it)
+                                }
+                            }
                             captureBoundReassertCaps() // Bug 9: remember the caps so we can hold them each tick
                         }
                         else -> startAutoTdp(foreground, null) // global default
@@ -1175,7 +1875,9 @@ class ForegroundAppMonitorService : Service() {
                     parts += tier.label
                 }
             }
-            config.profileBinding != null ->
+            // AUTO_OFF is an explicit "no AutoTDP" sentinel, not a saved-profile id — skip the profile apply
+            // (its fan/refresh extras below still apply). Other non-null bindings are display-profile ids.
+            config.profileBinding != null && !PerAppConfig.isAutoOff(config.profileBinding) ->
                 container.repository.applyDisplayProfileById(config.profileBinding).onSuccess {
                     parts += container.repository.observeState().first().displayProfiles
                         .firstOrNull { it.id == config.profileBinding }?.name ?: "Saved profile"
@@ -1220,6 +1922,8 @@ class ForegroundAppMonitorService : Service() {
         boundConfig = null
         autoTdpPackage = null
         overlay.hide()
+        quickAccess.hide()
+        comboJob?.cancel()
     }
 
     private suspend fun restoreSnapshot(notify: Boolean = true) {

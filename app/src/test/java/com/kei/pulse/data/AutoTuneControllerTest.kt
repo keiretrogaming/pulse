@@ -4,6 +4,7 @@ import com.kei.pulse.data.AutoTuneController.Action
 import com.kei.pulse.model.AutoTdpBias
 import com.kei.pulse.model.CpuPolicyInfo
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -165,7 +166,7 @@ class AutoTuneControllerTest {
         // (82°C, below the 85 hard trip), GPU NOT the bottleneck (70%). The old rule (fire only when there's
         // no bottleneck) kept RAISING — chasing 60 into the thermal wall (18W/91°C). Now it stops pumping and
         // harvests the idle GPU to settle cool, accepting the achievable rate.
-        // SMOOTH bias (ceiling 86 °C) so 82 °C stays below the ceiling and exercises the below-target harvest,
+        // SMOOTH bias (ceiling 87 °C) so 82 °C stays below the ceiling and exercises the below-target harvest,
         // not the thermal-ceiling rail (which would also trim the perf cluster).
         val c = newController(60).apply { bias = AutoTdpBias.SMOOTH }
         c.warmStart(policies, mapOf(gpu.id to 100)) // GPU pinned at max
@@ -200,6 +201,51 @@ class AutoTuneControllerTest {
             assertTrue("$it ceiling must clear the ~80 °C prime floor",
                 newController(60).apply { bias = it }.thermalCeilingC() > 80)
         }
+    }
+
+    @Test
+    fun biasGradientPinsEveryKnobAndStaysMonotonicEfficientToSmooth() {
+        // The three biases ARE six hand-tuned numbers ([gateParamsFor]) + the watt cap ([powerCeilingW]); every
+        // other knob in the controller is bias-independent. This pins each value AND the EFFICIENT→SMOOTH
+        // ordering, so a future retune can't silently invert the lever (e.g. make BALANCED run hotter/hungrier
+        // than SMOOTH) even if it changes the exact numbers — the lever's whole meaning is the monotonic gradient.
+        val e = newController().gateParamsFor(AutoTdpBias.EFFICIENT)
+        val b = newController().gateParamsFor(AutoTdpBias.BALANCED)
+        val s = newController().gateParamsFor(AutoTdpBias.SMOOTH)
+
+        // --- Exact values (on-device-tuned starting points; change deliberately, never by accident). ---
+        // Watt cap — the PRIMARY Odin lever; companion is the single source of truth (also shown in the UI chips).
+        assertEquals(11f, AutoTuneController.powerCeilingW(AutoTdpBias.EFFICIENT), 0f)
+        assertEquals(12.5f, AutoTuneController.powerCeilingW(AutoTdpBias.BALANCED), 0f)
+        assertEquals(14f, AutoTuneController.powerCeilingW(AutoTdpBias.SMOOTH), 0f)
+        // …and the gate carries the same watt cap it will enforce.
+        assertEquals(11f, e.powerCeilingW, 0f)
+        assertEquals(12.5f, b.powerCeilingW, 0f)
+        assertEquals(14f, s.powerCeilingW, 0f)
+        // Thermal ceiling.
+        assertEquals(82, e.ceilingC); assertEquals(84, b.ceilingC); assertEquals(87, s.ceilingC)
+        // Margin gate: tail-EMA alpha, near/over budget-fracs, pre-raise confirm.
+        assertEquals(0.30f, e.alpha, 0f); assertEquals(0.45f, b.alpha, 0f); assertEquals(0.60f, s.alpha, 0f)
+        assertEquals(1.9f, e.nearFrac, 0f); assertEquals(1.6f, b.nearFrac, 0f); assertEquals(1.3f, s.nearFrac, 0f)
+        assertEquals(2.2f, e.overFrac, 0f); assertEquals(1.9f, b.overFrac, 0f); assertEquals(1.6f, s.overFrac, 0f)
+        assertEquals(3, e.confirm); assertEquals(2, b.confirm); assertEquals(2, s.confirm)
+
+        // --- The invariant (intent): protectiveness rises EFFICIENT → BALANCED → SMOOTH. ---
+        // More headroom (ASCENDING): watts, thermal ceiling, gate reaction speed (alpha).
+        assertTrue("powerCeilingW asc", e.powerCeilingW < b.powerCeilingW && b.powerCeilingW < s.powerCeilingW)
+        assertTrue("ceilingC asc", e.ceilingC < b.ceilingC && b.ceilingC < s.ceilingC)
+        assertTrue("alpha asc", e.alpha < b.alpha && b.alpha < s.alpha)
+        // Trips sooner / protects frames harder (DESCENDING): the × budget thresholds and the pre-raise debounce.
+        assertTrue("nearFrac desc", e.nearFrac > b.nearFrac && b.nearFrac > s.nearFrac)
+        assertTrue("overFrac desc", e.overFrac > b.overFrac && b.overFrac > s.overFrac)
+        assertTrue("confirm non-increasing", e.confirm >= b.confirm && b.confirm >= s.confirm)
+        // Within each bias the suppress-harvest band sits below the pre-raise trigger.
+        listOf(e, b, s).forEach { assertTrue("nearFrac < overFrac for $it", it.nearFrac < it.overFrac) }
+
+        // The accessor reflects the LIVE gate the controller decides with — not a parallel lookup table.
+        val live = newController().apply { bias = AutoTdpBias.BALANCED }
+        assertEquals(b, live.gateParamsFor(live.bias))
+        assertEquals("thermalCeilingC() agrees with the gate", b.ceilingC, live.thermalCeilingC())
     }
 
     @Test
@@ -295,6 +341,20 @@ class AutoTuneControllerTest {
     }
 
     @Test
+    fun doesNotSettleWhenThePrimeCoreIsBusyButNotPegged() {
+        // Megabonk regression: a light, COOL game (44 °C, ~5 W) whose hottest core sits at ~80 % — BUSY but NOT
+        // pegged — with GPU headroom and fps below 60. Raising its clocks DOES lift fps, so it must keep CHASING,
+        // not engage the prime-bound settle (which would harvest the GPU and oscillate — the wobble the user hit).
+        // The settle is only for a genuinely pegged core (Stray 95–100, the vendor-floored prime wall); a merely-
+        // busy 66–81 % core was mistaken for that wall (CPU_CORE_BOUND 65) and strangled cool mid-range games.
+        val c = newController(60)
+        c.warmStart(policies, mapOf(gpu.id to 60)) // GPU below max so a chase-raise is observable
+        val r = c.feed(50f, cpuBusy = 20, gpuBusy = 75, cpuCorePeak = 80, cpuTemp = 44, gpuTemp = 42)
+        assertEquals("a busy-but-not-pegged cool game chases the target, doesn't settle", Action.RAISE, r.action)
+        assertTrue("the GPU is given clock to chase, not harvested by a false settle", c.capFor(gpu.id) >= 60)
+    }
+
+    @Test
     fun powerCooldownSuppressesRaiseAfterGoingOverBudget() {
         // After draw exceeds the cap, the chase-raise stays suppressed for a few ticks even once the smoothed
         // draw dips back under — that stickiness is what stops the raise→spike→trim bounce (signal noise can't
@@ -326,6 +386,34 @@ class AutoTuneControllerTest {
         repeat(6) { last = c.feed(35f, jank = 28, cpuBusy = 42, gpuBusy = 75, cpuCorePeak = 99, cpuTemp = 80, gpuTemp = 66) }
         assertTrue("latched prime-wall settle outranks the lockout — no chase-raise", last.action != Action.RAISE)
         assertEquals("the pegged prime is never trimmed (no-op for heat)", 100, c.capFor(prime.id))
+    }
+
+    @Test
+    fun odinPowerTuningAppliesOnlyToTheOdinSoc() {
+        // The watt cap + prime-walled settle are Odin (CQ8725S) chassis/floored-prime tuning. They must NOT
+        // apply to the SD 8 Gen 2 (QCS8550 — Thor/RP6), whose prime scales and chassis differs.
+        assertTrue(AutoTuneController.appliesOdinPowerTuning("CQ8725S"))
+        assertTrue("case-insensitive", AutoTuneController.appliesOdinPowerTuning("cq8725s"))
+        assertFalse("SD 8 Gen 2 (Thor / RP6)", AutoTuneController.appliesOdinPowerTuning("QCS8550"))
+        assertFalse("unknown/null SoC", AutoTuneController.appliesOdinPowerTuning(null))
+    }
+
+    @Test
+    fun sdGen2DoesNotApplyThePowerCeiling() {
+        // With Odin power tuning OFF (the SD 8 Gen 2 path), even well over the watt envelope it must NOT
+        // power-trim — it chases the target. (Contrast: powerCeilingTrimsWhenDrawExceeds, where it's ON.)
+        val c = newController(60).apply { bias = AutoTdpBias.EFFICIENT; wattCapAndSettleEnabled = false }
+        c.warmStart(policies, mapOf(prime.id to 60, perf.id to 60, gpu.id to 60)) // room to raise
+        val r = c.feed(45f, drawW = 18f, gpuBusy = 70)
+        assertEquals("watt cap disabled ⇒ raise/chase, never power-trim", Action.RAISE, r.action)
+    }
+
+    @Test
+    fun sdGen2DoesNotEngageThePrimeWalledSettle() {
+        // The SD 8 Gen 2 prime SCALES (595→3187 MHz), so the settle must never latch and hold it down.
+        val c = newController(60).apply { wattCapAndSettleEnabled = false }
+        repeat(6) { c.feed(48f, cpuBusy = 45, gpuBusy = 75, cpuCorePeak = 95, cpuTemp = 70, gpuTemp = 65) }
+        assertFalse("settle never latches on the SD 8 Gen 2", c.isPrimeWalled)
     }
 
     @Test

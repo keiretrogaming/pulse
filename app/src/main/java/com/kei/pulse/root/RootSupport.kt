@@ -22,6 +22,10 @@ object RootSupport {
         }
     }
 
+    // The generated script lives in app-private storage but MUST be world-readable/-executable: the stock
+    // PServer service runs it as root from a DIFFERENT uid, so it has to read+exec our file. This is the core
+    // of the no-root mechanism, not an oversight — hence the deliberate suppression.
+    @android.annotation.SuppressLint("SetWorldReadable")
     fun runGeneratedScript(
         context: Context,
         scriptName: String,

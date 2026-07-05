@@ -254,6 +254,9 @@ class PerformanceTileService : TileService() {
     }
 
     @Suppress("DEPRECATION")
+    // Verified false positive: line below is version-gated to API < 34 (Thor/RP6 = Android 13) where the
+    // Intent overload is the ONLY one available; API 34+ (Odin) uses the PendingIntent overload above.
+    @android.annotation.SuppressLint("StartActivityAndCollapseDeprecated")
     private fun launchIntentAndCollapse(intent: Intent) {
         // API 34+ (Odin 3 = Android 15): the Intent overload throws
         // UnsupportedOperationException — a PendingIntent is mandatory.

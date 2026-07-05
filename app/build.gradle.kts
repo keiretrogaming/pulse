@@ -35,8 +35,8 @@ android {
         applicationId = "com.kei.pulse"
         minSdk = 31
         targetSdk = 34
-        versionCode = 298
-        versionName = "1.19.1"
+        versionCode = 303
+        versionName = "1.19.6"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -83,6 +83,19 @@ android {
         jvmTarget = "17"
     }
 
+    lint {
+        // Quiet non-actionable advisories so lintDebug stays clean and meaningful:
+        //  - dependency/SDK/Gradle "newer version available" — deps are deliberately pinned for stability
+        //  - OldTargetApi — targetSdk 34 is intentional (see CLAUDE.md)
+        //  - ObsoleteSdkInt — harmless dead version guards under minSdk 31
+        //  - UseKtx (style) / DataExtractionRules (allowBackup=true is intentional)
+        // Real-bug checks (UnusedResources, SetWorldReadable, DefaultLocale, …) stay ON.
+        disable += setOf(
+            "GradleDependency", "NewerVersionAvailable", "AndroidGradlePluginVersion",
+            "OldTargetApi", "ObsoleteSdkInt", "UseKtx", "DataExtractionRules",
+        )
+    }
+
     buildFeatures {
         compose = true
     }
@@ -118,4 +131,11 @@ dependencies {
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
+}
+
+// Forward -Dreplay.logcat=<path> to the unit-test JVM so AutoTdpReplayTest.adHocReplayOfASharedCapture can
+// replay an arbitrary PulseAutoTdp capture on demand. Only set when provided, so the test's assumeTrue(...)
+// skips it otherwise.
+tasks.withType<Test>().configureEach {
+    System.getProperty("replay.logcat")?.let { systemProperty("replay.logcat", it) }
 }

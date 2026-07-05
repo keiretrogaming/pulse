@@ -36,7 +36,7 @@ If your device ships that service, PULSE just works. If it does not, PULSE tells
 | **AYN Thor** (Base / Pro / Max) | Snapdragon 8 Gen 2 | `QCS8550` | Adreno 740 | 13 |
 | **Retroid Pocket 6** | Snapdragon 8 Gen 2 | `QCS8550` | Adreno 740 | 13 |
 
-> PULSE reads each device's clusters, per-core frequency ranges, and GPU power levels live from sysfs at runtime, so it adapts to whatever the hardware exposes. Other Qualcomm handhelds with a `PServerBinder` service may work — but the three above are what it is tuned and hardware-tested on.
+> PULSE reads each device's clusters, per-core frequency ranges, and GPU power levels live from sysfs at runtime, so it adapts to whatever the hardware exposes. Other AYN and Retroid handhelds with a `PServerBinder` service may work — but the three above are what it is tuned and hardware-tested on.
 
 > [!WARNING]
 > **PULSE changes CPU and GPU frequency limits.** That affects stability, thermals, battery life, and performance, and is **not guaranteed safe for your hardware.** Use it only if you understand what frequency limits do and accept the risk. The device's own kernel thermal limiter always stays in charge underneath PULSE, but you are still the one turning the dials.

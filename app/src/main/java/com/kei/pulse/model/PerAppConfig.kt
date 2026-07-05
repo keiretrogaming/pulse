@@ -71,6 +71,13 @@ data class PerAppConfig(
         const val AUTO_BINDING = "auto:tdp"
 
         /**
+         * Binding sentinel for "this app explicitly runs NO AutoTDP" — distinct from `null` (inherit the
+         * global default) and from a tier/Custom binding. Lets a per-app toggle turn AutoTDP OFF for one game
+         * even when the global default is ON (the gap that [QuickAccessPerApp] bug #1 left).
+         */
+        const val AUTO_OFF_BINDING = "auto:off"
+
+        /**
          * AutoTDP FPS-target chips for a **Game-Mode-cap** device (Odin 3): 30/60/120 are hard-capped at
          * 120 Hz (they divide 120 cleanly). **90 and 40 are intentionally omitted** — the Odin panel is
          * 60/120 only (no 90 Hz or 40 Hz mode), and Android floors a 90 fps-cap to 60 and a 40 to 30 (the
@@ -88,12 +95,12 @@ data class PerAppConfig(
 
         const val DEFAULT_FPS_TARGET = 60
 
-        /** True for the SoC whose firmware honors the Game Mode fps cap (Odin 3); others use the refresh path. */
-        fun isGameModeCapSoc(soc: String?): Boolean = soc?.trim()?.uppercase() == "CQ8725S"
+        /** True for the SoC whose firmware honors the Game Mode fps cap (Odin 3); others use the refresh path.
+         *  Delegates to the [DeviceProfiles] invariants table (single source for per-device facts). */
+        fun isGameModeCapSoc(soc: String?): Boolean = DeviceProfiles.forSoc(soc).honorsGameModeFpsCap
 
-        /** The AutoTDP FPS-target options available for this device's [soc]. */
-        fun fpsTargetsFor(soc: String?): List<Int> =
-            if (isGameModeCapSoc(soc)) FPS_TARGET_OPTIONS else FPS_TARGET_OPTIONS_REFRESH
+        /** The AutoTDP FPS-target options available for this device's [soc] (from [DeviceProfiles]). */
+        fun fpsTargetsFor(soc: String?): List<Int> = DeviceProfiles.forSoc(soc).fpsTargetOptions
 
         /**
          * Whether to enforce [target] via the **Game Mode fps cap** (panel held at [maxRefresh]) instead of
@@ -117,6 +124,8 @@ data class PerAppConfig(
         fun fpsTargetLabel(target: Int): String = if (target <= 0) "Max" else target.toString()
 
         fun isAuto(binding: String?): Boolean = binding == AUTO_BINDING
+
+        fun isAutoOff(binding: String?): Boolean = binding == AUTO_OFF_BINDING
 
         fun tierBinding(tier: PowerTier): String = "$TIER_PREFIX${tier.name}"
 

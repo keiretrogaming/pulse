@@ -218,6 +218,42 @@ class PerformanceRepository(
         )
     }
 
+    /**
+     * Live GPU scaling-max readback (kHz) for the Quick Access GPU-cap stepper — one node read, so the
+     * stepper's shown value is what the device actually holds. Null when policies aren't detected yet.
+     */
+    fun readCurrentGpuCapKhz(): Int? {
+        val gpu = processCachedPolicies.firstOrNull { it.isGpu } ?: return null
+        return detector.readCurrentMaxValues(listOf(gpu))[gpu.id]
+    }
+
+    /**
+     * Cap the GPU at [freqKhz] (snapped to a supported level) while PRESERVING the saved Custom CPU values —
+     * the Quick Access bar's GPU-cap stepper. A partial persistAsCustom map would REPLACE the whole saved
+     * Custom map (silent CPU-values loss), so this merges: the saved Custom values (falling back to the live
+     * device values when nothing is saved yet) + the new GPU entry, applied and re-persisted as the full map.
+     */
+    suspend fun applyGpuCap(freqKhz: Int): Result<ApplyOutcome> {
+        if (!rootCommandRunner.isAvailable) {
+            return Result.failure(IllegalStateException("PServer not available"))
+        }
+        val policies = resolvePolicies()
+        val gpu = policies.firstOrNull { it.isGpu }
+            ?: return Result.failure(IllegalStateException("No GPU policy found"))
+        val target = gpu.supportedFrequencies.minByOrNull { kotlin.math.abs(it - freqKhz) }
+            ?: gpu.selectableMaxFreq
+        val saved = profileStorage.customValues.first()
+            .filterKeys { policyId -> policies.any { it.id == policyId } }
+        val base = saved.ifEmpty { detector.readCurrentMaxValues(policies) }
+        return applyValues(
+            policies = policies,
+            selectedValues = base + (gpu.id to target),
+            isReset = false,
+            appliedDisplayProfileId = ProfileStateResolver.MANUAL_PROFILE_ID,
+            persistAsCustom = true,
+        )
+    }
+
     private fun resolvePolicies(): List<CpuPolicyInfo> {
         return if (processCachedPolicies.isNotEmpty()) {
             val liveValues = detector.readCurrentMaxValues(processCachedPolicies)

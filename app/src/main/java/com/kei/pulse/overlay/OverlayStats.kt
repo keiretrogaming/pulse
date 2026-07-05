@@ -20,6 +20,14 @@ data class OverlayStats(
     val minutesLeft: Int? = null,
     /** Live AutoTDP state when a session is active (null otherwise). */
     val autoTdp: AutoTdpReadout? = null,
+    /** Current screen brightness 0..100 (for the Quick Access System slider); null if unread. */
+    val brightnessPercent: Int? = null,
+    /** Current media volume 0..100 (for the Quick Access System slider); null if unread. */
+    val volumePercent: Int? = null,
+    /** The Adreno's supported frequencies (kHz, ascending) for the Quick Access GPU-cap stepper; null if unread. */
+    val gpuLevels: List<Int>? = null,
+    /** The Adreno's LIVE current max (kHz) read back from the device — the stepper's source of truth. */
+    val gpuCapKhz: Int? = null,
 )
 
 /** Below this smoothed draw (W), a battery time-left estimate is meaningless (paused game ≈ 0 W → "200h"). */

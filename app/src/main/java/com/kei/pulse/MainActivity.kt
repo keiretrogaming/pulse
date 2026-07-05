@@ -83,6 +83,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         maybeRequestQuickSettingsTileOnFirstRun()
+        maybePromptBatteryExemption()
 
         setContent {
             val settings = viewModel.settings.collectAsStateWithLifecycle().value
@@ -200,6 +201,11 @@ class MainActivity : ComponentActivity() {
                             onOverlayPresetChange = viewModel::setOverlayPreset,
                             onOverlayElementToggle = viewModel::setOverlayElement,
                             onOverlayOpacityChange = viewModel::setOverlayOpacity,
+                            onQuickAccessChange = ::setQuickAccessEnabled,
+                            onQuickAccessShowHandleChange = viewModel::setQuickAccessShowHandle,
+                            onSetQuickAccessCombo = viewModel::captureQuickAccessCombo,
+                            onClearQuickAccessCombo = viewModel::clearQuickAccessCombo,
+                            capturingCombo = viewModel.capturingCombo.collectAsStateWithLifecycle().value,
                         )
                     } else {
                         MainTunerScreen(
@@ -276,6 +282,7 @@ class MainActivity : ComponentActivity() {
                             onAutoTdpEnabledChange = ::setAutoTdpDefaultEnabled,
                             autoTdpFpsTarget = autoTdpFpsTarget,
                             autoTdpFpsOptions = viewModel.autoTdpFpsOptions,
+                            autoTdpShowWattCaps = viewModel.autoTdpShowWattCaps,
                             onAutoTdpFpsTargetChange = viewModel::setAutoTdpFpsTarget,
                             autoTdpAggressivePark = autoTdpAggressivePark,
                             onAutoTdpAggressiveParkChange = viewModel::setAutoTdpAggressivePark,
@@ -296,6 +303,7 @@ class MainActivity : ComponentActivity() {
     // Set when the user flips the overlay on without the "display over other apps" permission:
     // we bounce them to the system grant screen and finish enabling when they return with it.
     private var pendingOverlayEnable = false
+    private var pendingQuickAccessEnable = false
 
     // Set when AutoTDP (global default) is flipped on without Usage access — same bounce/return flow.
     private var pendingAutoTdpEnable = false
@@ -324,7 +332,24 @@ class MainActivity : ComponentActivity() {
                     startActivity(android.content.Intent(android.provider.Settings.ACTION_USAGE_ACCESS_SETTINGS))
                     Toast.makeText(
                         applicationContext,
-                        "Allow usage access for PULSE, then come back",
+                        "The overlay needs Usage access to know which game is on screen. Allow it for PULSE, then come back.",
+                        Toast.LENGTH_LONG,
+                    ).show()
+                }
+            }
+        }
+        if (pendingQuickAccessEnable) {
+            pendingQuickAccessEnable = false
+            if (PerformanceOverlay.hasPermission(this)) {
+                if (ForegroundAppMonitorService.hasUsageAccess(this)) {
+                    enableQuickAccess()
+                    Toast.makeText(applicationContext, "Quick Access bar enabled", Toast.LENGTH_SHORT).show()
+                } else {
+                    pendingQuickAccessEnable = true
+                    startActivity(android.content.Intent(android.provider.Settings.ACTION_USAGE_ACCESS_SETTINGS))
+                    Toast.makeText(
+                        applicationContext,
+                        "The Quick Access bar needs Usage access to know which game is on screen. Allow it for PULSE, then come back.",
                         Toast.LENGTH_LONG,
                     ).show()
                 }
@@ -356,7 +381,7 @@ class MainActivity : ComponentActivity() {
             startActivity(android.content.Intent(android.provider.Settings.ACTION_USAGE_ACCESS_SETTINGS))
             Toast.makeText(
                 applicationContext,
-                "Allow usage access for PULSE, then come back",
+                "AutoTDP needs Usage access to see which game is running. Allow it for PULSE, then come back.",
                 Toast.LENGTH_LONG,
             ).show()
             return
@@ -398,7 +423,7 @@ class MainActivity : ComponentActivity() {
             startActivity(android.content.Intent(android.provider.Settings.ACTION_USAGE_ACCESS_SETTINGS))
             Toast.makeText(
                 applicationContext,
-                "Allow usage access for PULSE, then come back",
+                "The overlay needs Usage access to know which game is on screen. Allow it for PULSE, then come back.",
                 Toast.LENGTH_LONG,
             ).show()
             return
@@ -414,6 +439,7 @@ class MainActivity : ComponentActivity() {
     private fun onPulseMasterToggle(enabled: Boolean) {
         viewModel.setPulseEnabled(enabled) {
             ForegroundAppMonitorService.start(this)
+            if (enabled) maybePromptBatteryExemption()
         }
     }
 
@@ -486,6 +512,49 @@ class MainActivity : ComponentActivity() {
         ForegroundAppMonitorService.start(this)
     }
 
+    /**
+     * Quick Access bar (experimental) — needs the same two permissions as the OSD (it draws an overlay and
+     * reads the foreground app), and must START the watcher when enabled, mirroring [setOverlayEnabled].
+     * Without this, flipping the toggle only persisted the flag and the bar never appeared.
+     */
+    private fun setQuickAccessEnabled(enabled: Boolean) {
+        if (!enabled) {
+            viewModel.setQuickAccess(false)
+            return
+        }
+        if (!PerformanceOverlay.hasPermission(this)) {
+            pendingQuickAccessEnable = true
+            startActivity(
+                android.content.Intent(
+                    android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:$packageName"),
+                ),
+            )
+            Toast.makeText(
+                applicationContext,
+                "Allow \"Display over other apps\" for PULSE, then come back",
+                Toast.LENGTH_LONG,
+            ).show()
+            return
+        }
+        if (!ForegroundAppMonitorService.hasUsageAccess(this)) {
+            pendingQuickAccessEnable = true
+            startActivity(android.content.Intent(android.provider.Settings.ACTION_USAGE_ACCESS_SETTINGS))
+            Toast.makeText(
+                applicationContext,
+                "The Quick Access bar needs Usage access to know which game is on screen. Allow it for PULSE, then come back.",
+                Toast.LENGTH_LONG,
+            ).show()
+            return
+        }
+        enableQuickAccess()
+    }
+
+    private fun enableQuickAccess() {
+        viewModel.setQuickAccess(true)
+        ForegroundAppMonitorService.start(this)
+    }
+
     private fun setPerAppProfilesEnabled(enabled: Boolean) {
         if (!enabled) {
             viewModel.setPerAppEnabled(false) {
@@ -500,7 +569,7 @@ class MainActivity : ComponentActivity() {
             startActivity(android.content.Intent(android.provider.Settings.ACTION_USAGE_ACCESS_SETTINGS))
             Toast.makeText(
                 applicationContext,
-                "Allow usage access for PULSE, then come back",
+                "Per-app profiles need Usage access to detect the foreground app. Allow it for PULSE, then come back.",
                 Toast.LENGTH_LONG,
             ).show()
             return
@@ -536,7 +605,7 @@ class MainActivity : ComponentActivity() {
                 startActivity(android.content.Intent(android.provider.Settings.ACTION_USAGE_ACCESS_SETTINGS))
                 Toast.makeText(
                     applicationContext,
-                    "Allow usage access for PULSE so per-app profiles take effect",
+                    "Per-app profiles need Usage access to detect the foreground app — allow it for PULSE.",
                     Toast.LENGTH_LONG,
                 ).show()
             }
@@ -562,6 +631,39 @@ class MainActivity : ComponentActivity() {
             container.settingsStorage.persistQuickSettingsTilePromptShown()
             if (QuickSettingsTilePrompt.isSupported) {
                 requestQuickSettingsTile(showResultToast = false)
+            }
+        }
+    }
+
+    /**
+     * One-time prompt: if PULSE is meant to run (master switch on) but isn't exempt from battery
+     * optimization, show the system "allow background running" dialog so its persistent watcher (global
+     * Fan/RGB, AutoTDP, OSD) isn't throttled in Doze or reclaimed in the background. Asked once (persisted)
+     * so it never nags. NB: nothing can survive an explicit force-stop / recents-swipe — this only helps
+     * against Doze + background memory reclaim.
+     */
+    @android.annotation.SuppressLint("BatteryLife") // deliberate: a user-driven persistent tuner watcher
+    private fun maybePromptBatteryExemption() {
+        lifecycleScope.launch {
+            val settings = container.settingsStorage.settings.first()
+            val power = getSystemService(android.os.PowerManager::class.java)
+            val exempt = power?.isIgnoringBatteryOptimizations(packageName) ?: true
+            if (!com.kei.pulse.appwatch.BatteryExemptionPrompt.shouldPrompt(
+                    masterEnabled = settings.pulseEnabled,
+                    isExempt = exempt,
+                    alreadyAsked = settings.batteryOptPromptShown,
+                )
+            ) {
+                return@launch
+            }
+            container.settingsStorage.persistBatteryOptPromptShown()
+            runCatching {
+                startActivity(
+                    android.content.Intent(
+                        android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                        android.net.Uri.parse("package:$packageName"),
+                    ),
+                )
             }
         }
     }

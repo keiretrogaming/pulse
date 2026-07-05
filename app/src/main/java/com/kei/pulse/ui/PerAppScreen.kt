@@ -359,7 +359,8 @@ private fun PerAppConfigDialog(
                         }
                 }
 
-                // AutoTDP forces the Smart fan itself, so the fan picker is hidden for it.
+                // AutoTDP uses the global fan choice; the per-app fan picker is hidden for it until the
+                // service layer supports per-app fan overrides during AutoTDP.
                 if (!PerAppConfig.isAuto(profileBinding)) {
                     DialogGroupLabel("FAN (ODIN)")
                     FlowRow(
@@ -420,7 +421,7 @@ private fun PerAppConfigDialog(
                 }
 
                 Text(
-                    text = "Applied when this app comes to the foreground; the previous state is restored when it leaves. \"Default\" leaves that control alone. AutoTDP pins the panel to max refresh and trims the CPU then GPU to hold your FPS target at the lowest power (forces Smart fan); \"Default\" target uses the global default, \"Max\" runs uncapped. Custom applies your saved Custom setup — for frequencies unique to this app, save a profile on the main screen and bind it here.",
+                    text = "Applied when this app comes to the foreground; the previous state is restored when it leaves. \"Default\" leaves that control alone. AutoTDP pins the panel to max refresh and trims the CPU then GPU to hold your FPS target at the lowest power; pair it with the global Custom fan on the main screen. \"Default\" target uses the global default, \"Max\" runs uncapped. Custom applies your saved Custom setup — for frequencies unique to this app, save a profile on the main screen and bind it here.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

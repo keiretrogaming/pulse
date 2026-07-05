@@ -28,9 +28,13 @@ class PerformanceCommandBuilder {
             if (policy.isGpu) {
                 appendGpuLevel(lines, policy, value)
             } else {
+                // Never echo a non-positive frequency to a CPU freq node — the kernel rejects it / the result
+                // is undefined. A 0/negative value here means malformed detection (or a reset/uninstall edge);
+                // skip the cluster entirely rather than write garbage.
+                if (value <= 0) return@forEach
                 if (policy.id in lowerMinPolicyIds) {
                     val floor = policy.supportedFrequencies.minOrNull() ?: policy.minFreq
-                    write(lines, "${policy.policyPath}/scaling_min_freq", floor.toLong(), targetMode)
+                    if (floor > 0) write(lines, "${policy.policyPath}/scaling_min_freq", floor.toLong(), targetMode)
                 }
                 write(lines, policy.scalingMaxPath, value.toLong(), targetMode)
             }

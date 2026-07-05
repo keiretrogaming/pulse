@@ -1,7 +1,8 @@
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
     <string name="app_name">PULSE</string>
-    <string name="app_full_name">P.U.L.S.E.</string>
-    <string name="app_backronym">Performance Utility for Load and System Efficiency</string>
+    <!-- Branding strings kept intentionally (About/credits); not wired to a view yet. -->
+    <string name="app_full_name" tools:ignore="UnusedResources">P.U.L.S.E.</string>
+    <string name="app_backronym" tools:ignore="UnusedResources">Performance Utility for Load and System Efficiency</string>
     <string name="tile_label">PULSE Tuner</string>
     <string name="tile_title">PULSE</string>
     <string name="tile_state_manual">Manual</string>

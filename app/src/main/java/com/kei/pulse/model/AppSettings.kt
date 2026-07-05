@@ -106,6 +106,8 @@ data class AppSettings(
     val sleepProfileId: String? = null,
     val hasPromptedQuickSettingsTile: Boolean = false,
     val isQuickSettingsTileAdded: Boolean = false,
+    /** True once we've shown the "ignore battery optimization so PULSE keeps running" system prompt (ask once). */
+    val batteryOptPromptShown: Boolean = false,
     val powerTargetEnabled: Boolean = false,
     val powerTargetPercent: Int = 100,
     val powerTargetCpuOnly: Boolean = false,
@@ -131,6 +133,22 @@ data class AppSettings(
     val autoTdpBias: AutoTdpBias = AutoTdpBias.EFFICIENT,
     // In-game overlay (OSD). Position is a TOP|START pixel offset; opacity is a 40–100 percent.
     val overlayEnabled: Boolean = false,
+    /**
+     * Quick Access Bar (EXPERIMENTAL, default OFF). A right-docked in-game panel to swap PULSE settings
+     * live, à la the Steam Deck Quick Access menu. Opt-in only — nothing shows unless this is on.
+     */
+    val quickAccessEnabled: Boolean = false,
+    /** Show the floating handle for the Quick Access bar. Off = combo-only (no on-screen arrow). */
+    val quickAccessShowHandle: Boolean = true,
+    /** Controller combo that toggles the Quick Access bar, as `+`-joined button names; null = none set. */
+    val quickAccessCombo: String? = null,
+    /**
+     * Quick Access scope (SteamOS-style "This game" vs "All games"): when true, the bar's performance edits
+     * (AutoTDP/tier/fps/bias/park) write the FOREGROUND game's per-app profile; when false they write the
+     * GLOBAL default. Sticky. Default true = the historical per-game behavior. Fan/RGB/overlay/system controls
+     * are always global regardless.
+     */
+    val quickAccessPerGameScope: Boolean = true,
     val overlayPreset: OverlayPreset = OverlayPreset.COMPACT,
     val overlayOpacity: Int = 90,
     val overlayPosX: Int = 24,
