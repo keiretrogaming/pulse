@@ -1839,12 +1839,12 @@ class ForegroundAppMonitorService : Service() {
     private suspend fun snapshotCurrentState(config: PerAppConfig) {
         val settings = container.settingsStorage.settings.first()
         container.perAppConfigStorage.persistRestoreState(
-            PerAppRestoreState(
+            captureInitialRestoreState(
+                firstConfig = config,
                 values = container.repository.readCurrentValues(),
-                appliedDisplayProfileId = ProfileStateResolver.MANUAL_PROFILE_ID,
                 activeTierLabel = settings.activeTierLabel,
-                fanMode = if (config.fanMode != null) fanController.readMode() else null,
-                refreshRateHz = if (config.refreshRateHz != null) refreshRateController.readPeak() else null,
+                readFanMode = fanController::readMode,
+                readRefreshRate = refreshRateController::readPeak,
                 // Tiers/Custom re-assert a governor on apply, so capture it to restore on exit.
                 governor = ensurePolicies().firstOrNull { !it.isGpu }?.let { governorController.readGovernor(it) },
             ),
