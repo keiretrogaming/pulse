@@ -1778,18 +1778,12 @@ class ForegroundAppMonitorService : Service() {
         transitionMutex.withLock {
             val config = container.perAppConfigStorage.configs.first()
                 .firstOrNull { it.packageName == foreground }
-            // Global default: AutoTDP also engages for any foreground app (except PULSE + the home
-            // screen) when the user turned it on — games, emulators, and media alike.
-            // An app explicitly toggled to AUTO_OFF runs NO AutoTDP — it must behave like a neutral app even
-            // when the global default is on (QA bug #1 device half). An AUTO_OFF config still engages only if it
-            // carries a fan/refresh extra (applyConfig applies those; its AUTO_OFF "profile" is skipped there).
-            val explicitlyOff = config != null && PerAppConfig.isAutoOff(config.profileBinding)
-            val configEngages = config != null &&
-                !(explicitlyOff && config.fanMode == null && config.refreshRateHz == null)
-            val autoDefault = config == null &&
-                container.settingsStorage.settings.first().autoTdpDefaultEnabled &&
-                isGlobalAutoTdpTarget(foreground)
-            val engages = configEngages || autoDefault
+            val binding = resolveForegroundBinding(
+                config = config,
+                globalAutoTdpEnabled = container.settingsStorage.settings.first().autoTdpDefaultEnabled,
+                eligibleForGlobalAutoTdp = config == null && isGlobalAutoTdpTarget(foreground),
+            )
+            val engages = binding != ForegroundBindingKind.NONE
             val transition = planForegroundBindingTransition(
                 currentPackage = boundPackage,
                 nextPackage = foreground,
@@ -1805,29 +1799,31 @@ class ForegroundAppMonitorService : Service() {
                     stopAutoTdp()
                     clearBoundReassert() // drop any prior Custom/tier cap-hold + its locks before re-binding
                     val firstEntry = boundPackage == null
-                    when {
-                        config != null && PerAppConfig.isAuto(config.profileBinding) ->
-                            startAutoTdp(foreground, config)
-                        config != null -> {
+                    when (binding) {
+                        ForegroundBindingKind.EXPLICIT_AUTOTDP ->
+                            startAutoTdp(foreground, checkNotNull(config))
+                        ForegroundBindingKind.EXPLICIT_CONFIG -> {
+                            val explicitConfig = checkNotNull(config)
                             // Snapshot only when entering from unbound; switching between two bound
                             // apps keeps the original pre-launch snapshot.
                             if (firstEntry) snapshotCurrentState()
                             transition.restoreFanMode?.let { fanController.setMode(it) }
                             transition.restoreRefreshRateHz?.let { refreshRateController.setRate(it) }
-                            applyConfig(config)
+                            applyConfig(explicitConfig)
                             // GOVERNOR LEAK fix: AutoTDP forces Balanced and tiers/Custom set their own, but a
                             // DISPLAY-PROFILE (incl. Stock) or AUTO_OFF/extras-only binding applies clocks only —
                             // so on a DIRECT game→game switch it silently inherited the previous session's
                             // governor (a benchmark bound to "Stock" ran on AutoTDP's leftover Balanced; the
                             // field-reported ~8% score hit). Restore the captured pre-game governor for those.
-                            if (!firstEntry && PerAppConfig.tierFromBinding(config.profileBinding) == null) {
+                            if (!firstEntry && PerAppConfig.tierFromBinding(explicitConfig.profileBinding) == null) {
                                 container.perAppConfigStorage.restoreState.first()?.governor?.let {
                                     governorController.setGovernorRaw(ensurePolicies(), it)
                                 }
                             }
                             captureBoundReassertCaps() // Bug 9: remember the caps so we can hold them each tick
                         }
-                        else -> startAutoTdp(foreground, null) // global default
+                        ForegroundBindingKind.GLOBAL_AUTOTDP -> startAutoTdp(foreground, null)
+                        ForegroundBindingKind.NONE -> error("non-engaging binding entered rebind path")
                     }
                     boundPackage = foreground
                     boundConfig = config
