@@ -1383,15 +1383,16 @@ class ForegroundAppMonitorService : Service() {
     private suspend fun applyAutoTdpRegulation(pkg: String, config: PerAppConfig?) {
         val settings = container.settingsStorage.settings.first()
         val soc = container.repository.socModel()
-        // Snap to this SoC's valid options so a legacy 45/0 or an Odin value carried onto an 8 Gen 2 can't slip through.
-        val target = PerAppConfig.snapFpsTarget(
-            config?.fpsTarget ?: settings.autoTdpFpsTarget,
-            PerAppConfig.fpsTargetsFor(soc),
+        val maxRefresh = RefreshRateController.RATES.max()
+        val effective = resolveAutoTdpSettings(
+            config = config,
+            global = settings,
+            soc = soc,
+            maxRefreshRate = maxRefresh,
         )
-        autoTune.targetFps = target
-        // Per-app parking / bias override the global default (per-app-first).
-        autoTune.aggressivePark = config?.aggressivePark ?: settings.autoTdpAggressivePark
-        autoTune.bias = AutoTdpBias.resolve(config?.bias, settings.autoTdpBias)
+        autoTune.targetFps = effective.targetFps
+        autoTune.aggressivePark = effective.aggressivePark
+        autoTune.bias = effective.bias
         // Odin-only watt cap + prime-walled settle. The SD 8 Gen 2 (Thor/RP6) has a scaling prime + different
         // chassis, so it just chases the target there (the thermal ceiling stays as the universal backstop).
         autoTune.wattCapAndSettleEnabled = AutoTuneController.appliesOdinPowerTuning(soc)
@@ -1399,17 +1400,19 @@ class ForegroundAppMonitorService : Service() {
         // when the SoC honors it AND the target evenly divides 120 — 30/40/60/120 cap cleanly. 90 can't be
         // frame-paced at 120 Hz (floors to 60), and the 8 Gen 2 (Thor/RP6) doesn't honor the cap at all; both
         // take the refresh-rate path (the panel rate IS the cap). The clock loop holds [target].
-        val maxRefresh = RefreshRateController.RATES.max()
-        if (PerAppConfig.useGameModeCap(soc, target, maxRefresh)) {
+        if (effective.frameRatePath == AutoTdpEffectiveSettings.FrameRatePath.GAME_MODE_CAP) {
             refreshRateController.setRate(maxRefresh)
-            val applied = FrameLimiter.setCap(pkg, target)
+            val applied = FrameLimiter.setCap(pkg, effective.targetFps)
             // Confirm the firmware honored the value (not floored) — read it back in the diagnostic log.
             if (AUTO_DEBUG) {
-                android.util.Log.d("PulseAutoTdp", "FRAME-CAP requested=$target applied=[${applied?.trim()}]")
+                android.util.Log.d(
+                    "PulseAutoTdp",
+                    "FRAME-CAP requested=${effective.targetFps} applied=[${applied?.trim()}]",
+                )
             }
         } else {
             FrameLimiter.clear(pkg)
-            refreshRateController.setRate(target)
+            refreshRateController.setRate(effective.targetFps)
         }
     }
 
