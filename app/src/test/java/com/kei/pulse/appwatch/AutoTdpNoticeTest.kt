@@ -97,7 +97,9 @@ class AutoTdpNoticeTest {
             config,
             global,
         )
-        val settingGroups = notice.expanded.split("  ◆$nonBreakingSpace").drop(1)
+        val settingGroups = notice.expanded.split(
+            "$SETTING_GROUP_WRAP_OPPORTUNITY$SETTING_GROUP_MARKER$nonBreakingSpace",
+        ).drop(1)
 
         assertEquals(3, settingGroups.size)
         assertEquals(

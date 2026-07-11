@@ -1981,9 +1981,10 @@ class ForegroundAppMonitorService : Service() {
         val styled = SpannableStringBuilder()
         val mutedAccent = (accentColor and 0x00ffffff) or (0xa0 shl 24)
 
-        styled.append("${notice.appName}: ")
+        styled.append(notice.appName)
+        styled.append(NOTICE_HEADING_SEPARATOR)
         val autoTdpStart = styled.length
-        styled.append("AutoTDP")
+        styled.append(AUTOTDP_NOTICE_LABEL)
         styled.setSpan(
             StyleSpan(Typeface.BOLD),
             autoTdpStart,
@@ -1992,29 +1993,16 @@ class ForegroundAppMonitorService : Service() {
         )
 
         if (expanded) notice.settings.forEach { setting ->
-            styled.append("  ") // the safe wrap point between complete setting groups
-            val diamondStart = styled.length
-            styled.append('◆')
-            styled.setSpan(
-                ForegroundColorSpan(mutedAccent),
-                diamondStart,
-                styled.length,
-                Spannable.SPAN_EXCLUSIVE_EXCLUSIVE,
-            )
-            styled.append(SETTING_NON_BREAKING_SPACE)
-            styled.append(setting.key.replace(' ', SETTING_NON_BREAKING_SPACE))
-            styled.append(SETTING_NON_BREAKING_SPACE)
-            val arrowStart = styled.length
-            styled.append('›')
-            styled.setSpan(
-                ForegroundColorSpan(mutedAccent),
-                arrowStart,
-                styled.length,
-                Spannable.SPAN_EXCLUSIVE_EXCLUSIVE,
-            )
-            styled.append(SETTING_NON_BREAKING_SPACE)
+            styled.append(SETTING_GROUP_WRAP_OPPORTUNITY)
+            styled.appendMutedToken(SETTING_GROUP_MARKER, mutedAccent)
+            styled.appendNonBreakingGap()
+            styled.appendSettingText(setting.key)
+            styled.appendNonBreakingGap()
+            styled.appendMutedToken(SETTING_KEY_VALUE_SEPARATOR, mutedAccent)
+            styled.appendNonBreakingGap()
             val valueStart = styled.length
-            styled.append(setting.value.replace(' ', SETTING_NON_BREAKING_SPACE))
+            // Values are currently single words/numbers; normalization keeps future multi-word values intact.
+            styled.appendSettingText(setting.value)
             styled.setSpan(
                 ForegroundColorSpan(accentColor),
                 valueStart,
@@ -2029,6 +2017,25 @@ class ForegroundAppMonitorService : Service() {
             )
         }
         return styled
+    }
+
+    private fun SpannableStringBuilder.appendNonBreakingGap() {
+        append(SETTING_NON_BREAKING_SPACE)
+    }
+
+    private fun SpannableStringBuilder.appendSettingText(text: String) {
+        append(text.replace(SETTING_BREAKABLE_SPACE, SETTING_NON_BREAKING_SPACE))
+    }
+
+    private fun SpannableStringBuilder.appendMutedToken(token: Char, color: Int) {
+        val start = length
+        append(token)
+        setSpan(
+            ForegroundColorSpan(color),
+            start,
+            length,
+            Spannable.SPAN_EXCLUSIVE_EXCLUSIVE,
+        )
     }
 
     private fun createNotificationChannel() {
