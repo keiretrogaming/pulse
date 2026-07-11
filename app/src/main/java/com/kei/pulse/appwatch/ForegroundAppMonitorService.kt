@@ -1693,14 +1693,18 @@ class ForegroundAppMonitorService : Service() {
 
     private fun hideOverlay() {
         overlay.hide()
-        overlayDrawEma = null
-        overlayChargeEma = null
-        overlayMinutesEma = null
-        overlayMinutesDischarging = null
+        resetOverlayAverages()
         overlayProfileLabel = ""
         // Policies are kept (stable, and AutoTDP may still need them); FPS is stopped by the caller
         // when the game is truly gone. The session timer is NOT reset here — it pauses on leaving
         // the game and resumes when the same game returns (see startOrResumeSession / pauseSession).
+    }
+
+    private fun resetOverlayAverages() {
+        overlayDrawEma = null
+        overlayChargeEma = null
+        overlayMinutesEma = null
+        overlayMinutesDischarging = null
     }
 
     /**
@@ -1786,8 +1790,17 @@ class ForegroundAppMonitorService : Service() {
                 container.settingsStorage.settings.first().autoTdpDefaultEnabled &&
                 isGlobalAutoTdpTarget(foreground)
             val engages = configEngages || autoDefault
-            when {
-                engages && (boundPackage != foreground || force) -> {
+            val transition = planForegroundBindingTransition(
+                currentPackage = boundPackage,
+                nextPackage = foreground,
+                nextConfig = config,
+                originalState = container.perAppConfigStorage.restoreState.first(),
+                engages = engages,
+                force = force,
+            )
+            if (transition.flushOutgoingDraw) persistMeasuredDraw()
+            when (transition.kind) {
+                ForegroundBindingTransition.Kind.REBIND -> {
                     // Release any prior AutoTDP session first (e.g. switching directly between apps).
                     stopAutoTdp()
                     clearBoundReassert() // drop any prior Custom/tier cap-hold + its locks before re-binding
@@ -1798,7 +1811,9 @@ class ForegroundAppMonitorService : Service() {
                         config != null -> {
                             // Snapshot only when entering from unbound; switching between two bound
                             // apps keeps the original pre-launch snapshot.
-                            if (firstEntry) snapshotCurrentState(config)
+                            if (firstEntry) snapshotCurrentState()
+                            transition.restoreFanMode?.let { fanController.setMode(it) }
+                            transition.restoreRefreshRateHz?.let { refreshRateController.setRate(it) }
                             applyConfig(config)
                             // GOVERNOR LEAK fix: AutoTDP forces Balanced and tiers/Custom set their own, but a
                             // DISPLAY-PROFILE (incl. Stock) or AUTO_OFF/extras-only binding applies clocks only —
@@ -1816,13 +1831,13 @@ class ForegroundAppMonitorService : Service() {
                     }
                     boundPackage = foreground
                     boundConfig = config
-                    startOrResumeSession(foreground)
+                    if (transition.resetOverlayAverages) resetOverlayAverages()
+                    if (transition.restartSessionClock) startOrResumeSession(foreground)
                 }
-                !engages && boundPackage != null -> {
+                ForegroundBindingTransition.Kind.RELEASE -> {
                     // Left the bound app for a neutral one (PULSE itself or the home screen), so the
                     // tuner always shows (and edits) the general OS state, never a game's.
                     val wasExplicit = boundConfig != null
-                    persistMeasuredDraw() // final draw stats write for the session
                     pauseSession() // accrue play time; resumes if the user returns to this game
                     stopAutoTdp() // reopen clocks before restoring the pre-game snapshot
                     clearBoundReassert() // Bug 9: stop holding caps + hand their locks back to stock before restore
@@ -1832,15 +1847,15 @@ class ForegroundAppMonitorService : Service() {
                     boundConfig = null
                     hideOverlay()
                 }
+                ForegroundBindingTransition.Kind.HOLD -> Unit
             }
         }
     }
 
-    private suspend fun snapshotCurrentState(config: PerAppConfig) {
+    private suspend fun snapshotCurrentState() {
         val settings = container.settingsStorage.settings.first()
         container.perAppConfigStorage.persistRestoreState(
             captureInitialRestoreState(
-                firstConfig = config,
                 values = container.repository.readCurrentValues(),
                 activeTierLabel = settings.activeTierLabel,
                 readFanMode = fanController::readMode,
