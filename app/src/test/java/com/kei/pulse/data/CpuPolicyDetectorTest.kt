@@ -7,6 +7,15 @@ import org.junit.Test
 class CpuPolicyDetectorTest {
 
     @Test
+    fun `parses compact sysfs cpu list ranges`() {
+        val detector = CpuPolicyDetector(
+            privilegedReader = FakePrivilegedSysfsReader(emptyMap()),
+        )
+
+        assertEquals(listOf(0, 1, 2, 3, 6, 8, 9), detector.parseCpuIds("0-3,6,8-9"))
+    }
+
+    @Test
     fun `detects and sorts policies from sysfs`() {
         val fileSystem = FakeSysfsFileSystem(
             directories = listOf(
