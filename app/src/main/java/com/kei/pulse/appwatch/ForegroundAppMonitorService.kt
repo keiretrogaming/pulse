@@ -15,10 +15,17 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.Process
+import android.graphics.Typeface
+import android.graphics.Bitmap
+import android.text.Spannable
+import android.text.SpannableString
+import android.text.style.ForegroundColorSpan
+import android.text.style.StyleSpan
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
+import androidx.core.graphics.drawable.toBitmap
 import android.media.AudioManager
 import androidx.core.content.getSystemService
 import com.kei.pulse.AppContainer
@@ -1458,8 +1465,16 @@ class ForegroundAppMonitorService : Service() {
         // app switch.
         if (config != null && container.perAppConfigStorage.switchNotices.first()) {
             val appName = config.appLabel.takeIf { it.isNotBlank() } ?: pkg
-            showToast("PULSE · $appName: AutoTDP")
-            updateNotification("$appName: AutoTDP")
+            val includeOverrides = container.perAppConfigStorage.switchNoticeDetails.first()
+            val notice = AutoTdpNotice.text(appName, config, settings, includeOverrides)
+            showToast("PULSE · ${notice.expanded}")
+            updateNotification(
+                styledAutoTdpText(notice.compact, settings.accentColor),
+                notice.expanded.takeIf { includeOverrides }
+                    ?.let { styledAutoTdpText(it, settings.accentColor) },
+                settings.accentColor,
+                loadAppIcon(pkg),
+            )
         }
     }
 
@@ -1949,8 +1964,74 @@ class ForegroundAppMonitorService : Service() {
         }
     }
 
-    private fun updateNotification(text: String) {
-        getSystemService<NotificationManager>()?.notify(NOTIFICATION_ID, buildNotification(text))
+    private fun updateNotification(
+        text: CharSequence,
+        expandedText: CharSequence? = null,
+        accentColor: Int? = null,
+        largeIcon: Bitmap? = null,
+    ) {
+        getSystemService<NotificationManager>()?.notify(
+            NOTIFICATION_ID,
+            buildNotification(text, expandedText, accentColor, largeIcon),
+        )
+    }
+
+    private fun loadAppIcon(packageName: String): Bitmap? = runCatching {
+        packageManager.getApplicationIcon(packageName).toBitmap(width = 96, height = 96)
+    }.getOrNull()
+
+    /** Accent values and punctuation while leaving keys in Android's contrast-safe notification color. */
+    private fun styledAutoTdpText(text: String, accentColor: Int): CharSequence {
+        val styled = SpannableString(text)
+        val mutedAccent = (accentColor and 0x00ffffff) or (0xa0 shl 24)
+
+        listOf('◆', '›').forEach { marker ->
+            text.forEachIndexed { index, char ->
+                if (char == marker) {
+                    styled.setSpan(
+                        ForegroundColorSpan(mutedAccent),
+                        index,
+                        index + 1,
+                        Spannable.SPAN_EXCLUSIVE_EXCLUSIVE,
+                    )
+                }
+            }
+        }
+
+        var valueStart = text.indexOf('›')
+        while (valueStart >= 0) {
+            valueStart++
+            while (valueStart < text.length && text[valueStart].isWhitespace()) valueStart++
+            val valueEnd = sequenceOf(text.indexOf('◆', valueStart), text.indexOf('\n', valueStart))
+                .filter { it >= 0 }
+                .minOrNull()
+                ?: text.length
+            if (valueStart < valueEnd) {
+                styled.setSpan(
+                    ForegroundColorSpan(accentColor),
+                    valueStart,
+                    valueEnd,
+                    Spannable.SPAN_EXCLUSIVE_EXCLUSIVE,
+                )
+                styled.setSpan(
+                    StyleSpan(Typeface.BOLD),
+                    valueStart,
+                    valueEnd,
+                    Spannable.SPAN_EXCLUSIVE_EXCLUSIVE,
+                )
+            }
+            valueStart = text.indexOf('›', valueEnd)
+        }
+
+        text.indexOf("AutoTDP").takeIf { it >= 0 }?.let { start ->
+            styled.setSpan(
+                StyleSpan(Typeface.BOLD),
+                start,
+                start + "AutoTDP".length,
+                Spannable.SPAN_EXCLUSIVE_EXCLUSIVE,
+            )
+        }
+        return styled
     }
 
     private fun createNotificationChannel() {
@@ -1966,12 +2047,22 @@ class ForegroundAppMonitorService : Service() {
     }
 
     private fun buildNotification(
-        contentText: String = "Watching for configured apps to apply their profiles.",
-    ) =
-        NotificationCompat.Builder(this, CHANNEL_ID)
+        contentText: CharSequence = "Watching for configured apps to apply their profiles.",
+        expandedText: CharSequence? = null,
+        accentColor: Int? = null,
+        largeIcon: Bitmap? = null,
+    ): android.app.Notification {
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_tile_underclock)
             .setContentTitle("PULSE per-app profiles")
             .setContentText(contentText)
+            .apply {
+                accentColor?.let(::setColor)
+                largeIcon?.let(::setLargeIcon)
+                expandedText?.let {
+                    setStyle(NotificationCompat.BigTextStyle().bigText(it))
+                }
+            }
             .setOngoing(true)
             .setShowWhen(false)
             .setPriority(NotificationCompat.PRIORITY_LOW)
@@ -1983,22 +2074,23 @@ class ForegroundAppMonitorService : Service() {
                     PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
                 ),
             )
-            // In-game entry point to (un)lock the overlay for repositioning — works from the
-            // notification shade, which is reachable over full-screen games.
-            .addAction(
-                NotificationCompat.Action.Builder(
-                    R.drawable.ic_tile_underclock,
-                    "Move overlay",
-                    PendingIntent.getService(
-                        this,
-                        1,
-                        Intent(this, ForegroundAppMonitorService::class.java)
-                            .setAction(ACTION_TOGGLE_OVERLAY_LOCK),
-                        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-                    ),
-                ).build(),
-            )
-            .build()
+        // In-game entry point to (un)lock the overlay for repositioning — works from the
+        // notification shade, which is reachable over full-screen games.
+        builder.addAction(
+            NotificationCompat.Action.Builder(
+                R.drawable.ic_tile_underclock,
+                "Move overlay",
+                PendingIntent.getService(
+                    this,
+                    1,
+                    Intent(this, ForegroundAppMonitorService::class.java)
+                        .setAction(ACTION_TOGGLE_OVERLAY_LOCK),
+                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+                ),
+            ).build(),
+        )
+        return builder.build()
+    }
 
     companion object {
         private const val CHANNEL_ID = "per_app_profile_monitoring"

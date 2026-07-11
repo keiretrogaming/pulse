@@ -21,6 +21,7 @@ class PerAppConfigStorage(private val context: Context) {
     private val configsKey = stringPreferencesKey("per_app_configs")
     private val restoreKey = stringPreferencesKey("per_app_restore")
     private val switchNoticesKey = booleanPreferencesKey("per_app_switch_notices")
+    private val switchNoticeDetailsKey = booleanPreferencesKey("per_app_switch_notice_details")
     private val batteryWhKey = floatPreferencesKey("battery_capacity_wh")
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -65,6 +66,17 @@ class PerAppConfigStorage(private val context: Context) {
     suspend fun persistSwitchNotices(enabled: Boolean) {
         context.perAppDataStore.edit { preferences ->
             preferences[switchNoticesKey] = enabled
+        }
+    }
+
+    /** Whether AutoTDP switch notices include the per-app values that override global defaults. */
+    val switchNoticeDetails: Flow<Boolean> = context.perAppDataStore.data.map { preferences ->
+        preferences[switchNoticeDetailsKey] ?: true
+    }
+
+    suspend fun persistSwitchNoticeDetails(enabled: Boolean) {
+        context.perAppDataStore.edit { preferences ->
+            preferences[switchNoticeDetailsKey] = enabled
         }
     }
 

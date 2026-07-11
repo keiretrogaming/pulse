@@ -93,6 +93,10 @@ class TunerViewModel(
     val perAppSwitchNotices: StateFlow<Boolean> = (perAppConfigStorage?.switchNotices ?: flowOf(true))
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
 
+    val perAppSwitchNoticeDetails: StateFlow<Boolean> =
+        (perAppConfigStorage?.switchNoticeDetails ?: flowOf(true))
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
+
     val perAppBatteryWh: StateFlow<Float> = (perAppConfigStorage?.batteryCapacityWh ?: flowOf(0f))
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0f)
 
@@ -110,6 +114,12 @@ class TunerViewModel(
     fun setPerAppSwitchNotices(enabled: Boolean) {
         viewModelScope.launch {
             perAppConfigStorage?.persistSwitchNotices(enabled)
+        }
+    }
+
+    fun setPerAppSwitchNoticeDetails(enabled: Boolean) {
+        viewModelScope.launch {
+            perAppConfigStorage?.persistSwitchNoticeDetails(enabled)
         }
     }
 

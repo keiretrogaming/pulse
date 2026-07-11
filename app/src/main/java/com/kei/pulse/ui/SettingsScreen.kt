@@ -112,6 +112,8 @@ fun SettingsScreen(
     onOpenPerApps: () -> Unit = {},
     perAppSwitchNotices: Boolean = true,
     onPerAppSwitchNoticesChange: (Boolean) -> Unit = {},
+    perAppSwitchNoticeDetails: Boolean = true,
+    onPerAppSwitchNoticeDetailsChange: (Boolean) -> Unit = {},
     overlayEnabled: Boolean = false,
     overlayPreset: OverlayPreset = OverlayPreset.COMPACT,
     overlayElements: Set<OverlayElement> = OverlayPreset.COMPACT.elements,
@@ -364,6 +366,31 @@ fun SettingsScreen(
                 Switch(
                     checked = perAppSwitchNotices,
                     onCheckedChange = onPerAppSwitchNoticesChange,
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        text = "AutoTDP notification details",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        text = "Include per-app FPS target, aggressive parking, and efficiency overrides.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+                Switch(
+                    checked = perAppSwitchNoticeDetails,
+                    onCheckedChange = onPerAppSwitchNoticeDetailsChange,
+                    enabled = perAppSwitchNotices,
                 )
             }
         }
