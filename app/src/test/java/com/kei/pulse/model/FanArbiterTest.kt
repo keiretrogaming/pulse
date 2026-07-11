@@ -41,6 +41,32 @@ class FanArbiterTest {
     }
 
     @Test
+    fun `autotdp honors a per-app custom fan over the global mode`() {
+        assertEquals(
+            FanAction.RunCustomLoop,
+            decide(
+                autoTdpActive = true,
+                boundFanMode = FanController.CUSTOM,
+                managedFanMode = FanController.SPORT,
+                readLiveMode = mustNotRead,
+            ),
+        )
+    }
+
+    @Test
+    fun `autotdp does not let global custom override a per-app vendor mode`() {
+        assertEquals(
+            FanAction.None,
+            decide(
+                autoTdpActive = true,
+                boundFanMode = FanController.SPORT,
+                managedFanMode = FanController.CUSTOM,
+                readLiveMode = mustNotRead,
+            ),
+        )
+    }
+
+    @Test
     fun `autotdp with custom unsupported stands down, no mode read`() {
         assertEquals(
             FanAction.None,
