@@ -16,16 +16,14 @@ import android.os.IBinder
 import android.os.Looper
 import android.os.Process
 import android.graphics.Typeface
-import android.graphics.Bitmap
 import android.text.Spannable
-import android.text.SpannableString
+import android.text.SpannableStringBuilder
 import android.text.style.ForegroundColorSpan
 import android.text.style.StyleSpan
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
-import androidx.core.graphics.drawable.toBitmap
 import android.media.AudioManager
 import androidx.core.content.getSystemService
 import com.kei.pulse.AppContainer
@@ -1469,11 +1467,10 @@ class ForegroundAppMonitorService : Service() {
             val notice = AutoTdpNotice.text(appName, config, settings, includeOverrides)
             showToast("PULSE · ${notice.expanded}")
             updateNotification(
-                styledAutoTdpText(notice.compact, settings.accentColor),
+                styledAutoTdpText(notice, expanded = false, accentColor = settings.accentColor),
                 notice.expanded.takeIf { includeOverrides }
-                    ?.let { styledAutoTdpText(it, settings.accentColor) },
+                    ?.let { styledAutoTdpText(notice, expanded = true, accentColor = settings.accentColor) },
                 settings.accentColor,
-                loadAppIcon(pkg),
             )
         }
     }
@@ -1968,66 +1965,66 @@ class ForegroundAppMonitorService : Service() {
         text: CharSequence,
         expandedText: CharSequence? = null,
         accentColor: Int? = null,
-        largeIcon: Bitmap? = null,
     ) {
         getSystemService<NotificationManager>()?.notify(
             NOTIFICATION_ID,
-            buildNotification(text, expandedText, accentColor, largeIcon),
+            buildNotification(text, expandedText, accentColor),
         )
     }
 
-    private fun loadAppIcon(packageName: String): Bitmap? = runCatching {
-        packageManager.getApplicationIcon(packageName).toBitmap(width = 96, height = 96)
-    }.getOrNull()
-
-    /** Accent values and punctuation while leaving keys in Android's contrast-safe notification color. */
-    private fun styledAutoTdpText(text: String, accentColor: Int): CharSequence {
-        val styled = SpannableString(text)
+    /** Builds rich text directly from structured settings; keys retain Android's contrast-safe text color. */
+    private fun styledAutoTdpText(
+        notice: AutoTdpNoticeText,
+        expanded: Boolean,
+        accentColor: Int,
+    ): CharSequence {
+        val styled = SpannableStringBuilder()
         val mutedAccent = (accentColor and 0x00ffffff) or (0xa0 shl 24)
 
-        listOf('◆', '›').forEach { marker ->
-            text.forEachIndexed { index, char ->
-                if (char == marker) {
-                    styled.setSpan(
-                        ForegroundColorSpan(mutedAccent),
-                        index,
-                        index + 1,
-                        Spannable.SPAN_EXCLUSIVE_EXCLUSIVE,
-                    )
-                }
-            }
-        }
+        styled.append("${notice.appName}: ")
+        val autoTdpStart = styled.length
+        styled.append("AutoTDP")
+        styled.setSpan(
+            StyleSpan(Typeface.BOLD),
+            autoTdpStart,
+            styled.length,
+            Spannable.SPAN_EXCLUSIVE_EXCLUSIVE,
+        )
 
-        var valueStart = text.indexOf('›')
-        while (valueStart >= 0) {
-            valueStart++
-            while (valueStart < text.length && text[valueStart].isWhitespace()) valueStart++
-            val valueEnd = sequenceOf(text.indexOf('◆', valueStart), text.indexOf('\n', valueStart))
-                .filter { it >= 0 }
-                .minOrNull()
-                ?: text.length
-            if (valueStart < valueEnd) {
-                styled.setSpan(
-                    ForegroundColorSpan(accentColor),
-                    valueStart,
-                    valueEnd,
-                    Spannable.SPAN_EXCLUSIVE_EXCLUSIVE,
-                )
-                styled.setSpan(
-                    StyleSpan(Typeface.BOLD),
-                    valueStart,
-                    valueEnd,
-                    Spannable.SPAN_EXCLUSIVE_EXCLUSIVE,
-                )
-            }
-            valueStart = text.indexOf('›', valueEnd)
-        }
-
-        text.indexOf("AutoTDP").takeIf { it >= 0 }?.let { start ->
+        if (expanded) notice.settings.forEach { setting ->
+            styled.append("  ") // the safe wrap point between complete setting groups
+            val diamondStart = styled.length
+            styled.append('◆')
+            styled.setSpan(
+                ForegroundColorSpan(mutedAccent),
+                diamondStart,
+                styled.length,
+                Spannable.SPAN_EXCLUSIVE_EXCLUSIVE,
+            )
+            styled.append(SETTING_NON_BREAKING_SPACE)
+            styled.append(setting.key.replace(' ', SETTING_NON_BREAKING_SPACE))
+            styled.append(SETTING_NON_BREAKING_SPACE)
+            val arrowStart = styled.length
+            styled.append('›')
+            styled.setSpan(
+                ForegroundColorSpan(mutedAccent),
+                arrowStart,
+                styled.length,
+                Spannable.SPAN_EXCLUSIVE_EXCLUSIVE,
+            )
+            styled.append(SETTING_NON_BREAKING_SPACE)
+            val valueStart = styled.length
+            styled.append(setting.value.replace(' ', SETTING_NON_BREAKING_SPACE))
+            styled.setSpan(
+                ForegroundColorSpan(accentColor),
+                valueStart,
+                styled.length,
+                Spannable.SPAN_EXCLUSIVE_EXCLUSIVE,
+            )
             styled.setSpan(
                 StyleSpan(Typeface.BOLD),
-                start,
-                start + "AutoTDP".length,
+                valueStart,
+                styled.length,
                 Spannable.SPAN_EXCLUSIVE_EXCLUSIVE,
             )
         }
@@ -2050,7 +2047,6 @@ class ForegroundAppMonitorService : Service() {
         contentText: CharSequence = "Watching for configured apps to apply their profiles.",
         expandedText: CharSequence? = null,
         accentColor: Int? = null,
-        largeIcon: Bitmap? = null,
     ): android.app.Notification {
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_tile_underclock)
@@ -2058,7 +2054,6 @@ class ForegroundAppMonitorService : Service() {
             .setContentText(contentText)
             .apply {
                 accentColor?.let(::setColor)
-                largeIcon?.let(::setLargeIcon)
                 expandedText?.let {
                     setStyle(NotificationCompat.BigTextStyle().bigText(it))
                 }

@@ -7,6 +7,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class AutoTdpNoticeTest {
+    private val nonBreakingSpace = SETTING_NON_BREAKING_SPACE
     private val global = AppSettings(
         autoTdpFpsTarget = 60,
         autoTdpAggressivePark = true,
@@ -26,7 +27,13 @@ class AutoTdpNoticeTest {
         val notice = AutoTdpNotice.text("Game", config, global)
 
         assertEquals("Game: AutoTDP", notice.compact)
-        assertEquals("Game: AutoTDP  ◆ FPS target › 30  ◆ Aggressive park › Off  ◆ Efficiency › Smooth", notice.expanded)
+        assertEquals(
+            "Game: AutoTDP  ◆${nonBreakingSpace}FPS${nonBreakingSpace}target${nonBreakingSpace}›" +
+                "${nonBreakingSpace}30  ◆${nonBreakingSpace}Aggressive${nonBreakingSpace}park" +
+                "${nonBreakingSpace}›${nonBreakingSpace}Off  ◆${nonBreakingSpace}Efficiency" +
+                "${nonBreakingSpace}›${nonBreakingSpace}Smooth",
+            notice.expanded,
+        )
     }
 
     @Test
@@ -41,8 +48,8 @@ class AutoTdpNoticeTest {
             bias = AutoTdpBias.EFFICIENT,
         )
 
-        assertEquals(AutoTdpNoticeText("Game: AutoTDP", "Game: AutoTDP"), AutoTdpNotice.text("Game", inherited, global))
-        assertEquals(AutoTdpNoticeText("Game: AutoTDP", "Game: AutoTDP"), AutoTdpNotice.text("Game", matching, global))
+        assertEquals(AutoTdpNoticeText("Game", emptyList()), AutoTdpNotice.text("Game", inherited, global))
+        assertEquals(AutoTdpNoticeText("Game", emptyList()), AutoTdpNotice.text("Game", matching, global))
     }
 
     @Test
@@ -54,7 +61,7 @@ class AutoTdpNoticeTest {
         )
 
         assertEquals(
-            AutoTdpNoticeText("Game: AutoTDP", "Game: AutoTDP  ◆ FPS target › Max"),
+            AutoTdpNoticeText("Game", listOf(AutoTdpNoticeSetting("FPS target", "Max"))),
             AutoTdpNotice.text("Game", config, global),
         )
     }
@@ -70,7 +77,7 @@ class AutoTdpNoticeTest {
         )
 
         assertEquals(
-            AutoTdpNoticeText("Game: AutoTDP", "Game: AutoTDP"),
+            AutoTdpNoticeText("Game", emptyList()),
             AutoTdpNotice.text("Game", config, global, includeOverrides = false),
         )
     }
@@ -90,10 +97,17 @@ class AutoTdpNoticeTest {
             config,
             global,
         )
-        val settingGroups = notice.expanded.split("  ◆ ").drop(1)
+        val settingGroups = notice.expanded.split("  ◆$nonBreakingSpace").drop(1)
 
         assertEquals(3, settingGroups.size)
-        assertEquals(listOf("FPS target › 30", "Aggressive park › Off", "Efficiency › Smooth"), settingGroups)
+        assertEquals(
+            listOf(
+                "FPS${nonBreakingSpace}target${nonBreakingSpace}›${nonBreakingSpace}30",
+                "Aggressive${nonBreakingSpace}park${nonBreakingSpace}›${nonBreakingSpace}Off",
+                "Efficiency${nonBreakingSpace}›${nonBreakingSpace}Smooth",
+            ),
+            settingGroups,
+        )
         settingGroups.forEach { group -> assertEquals(-1, group.indexOf(' ')) }
     }
 }
