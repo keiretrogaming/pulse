@@ -115,6 +115,8 @@ class MainActivity : ComponentActivity() {
                     val perAppEnabled = viewModel.perAppEnabled.collectAsStateWithLifecycle().value
                     val perAppConfigs = viewModel.perAppConfigs.collectAsStateWithLifecycle().value
                     val perAppSwitchNotices = viewModel.perAppSwitchNotices.collectAsStateWithLifecycle().value
+                    val perAppSwitchNoticeDetails =
+                        viewModel.perAppSwitchNoticeDetails.collectAsStateWithLifecycle().value
 
                     // Existing per-app bindings must engage on launch even if the master toggle was never
                     // flipped — the watcher self-stops if nothing needs it. (Per-app comes first.)
@@ -193,6 +195,8 @@ class MainActivity : ComponentActivity() {
                             onOpenPerApps = { showPerApps = true },
                             perAppSwitchNotices = perAppSwitchNotices,
                             onPerAppSwitchNoticesChange = viewModel::setPerAppSwitchNotices,
+                            perAppSwitchNoticeDetails = perAppSwitchNoticeDetails,
+                            onPerAppSwitchNoticeDetailsChange = viewModel::setPerAppSwitchNoticeDetails,
                             overlayEnabled = settings.overlayEnabled,
                             overlayPreset = settings.overlayPreset,
                             overlayElements = settings.overlayElements,
