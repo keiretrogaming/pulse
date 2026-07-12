@@ -36,6 +36,7 @@ import com.kei.pulse.data.SocDetector
 import com.kei.pulse.data.TelemetryReader
 import com.kei.pulse.data.TelemetrySnapshot
 import com.kei.pulse.model.AppSettings
+import com.kei.pulse.model.AutoTdpBindingKind
 import com.kei.pulse.model.AutoTdpBias
 import com.kei.pulse.model.CustomFanGate
 import com.kei.pulse.model.CustomFanState
@@ -50,6 +51,7 @@ import com.kei.pulse.model.PerAppRestoreState
 import com.kei.pulse.model.PowerTier
 import com.kei.pulse.model.ProfileStateResolver
 import com.kei.pulse.model.RgbMode
+import com.kei.pulse.model.resolveAutoTdpBinding
 import com.kei.pulse.overlay.AutoTdpReadout
 import com.kei.pulse.overlay.ClusterReadout
 import com.kei.pulse.overlay.OverlayConfig
@@ -648,14 +650,24 @@ class ForegroundAppMonitorService : Service() {
             val cfg = foreground?.let { fg ->
                 container.perAppConfigStorage.configs.first().firstOrNull { it.packageName == fg }
             }
-            if (foreground != null && cfg != null) {
+            val binding = foreground?.let { fg ->
+                resolveAutoTdpBinding(
+                    config = cfg,
+                    globalAutoTdpEnabled = container.settingsStorage.settings.first().autoTdpDefaultEnabled,
+                    eligibleForGlobalAutoTdp = isGlobalAutoTdpTarget(fg),
+                )
+            }
+            if (foreground != null && binding != null && binding != AutoTdpBindingKind.NONE) {
                 boundPackage = foreground
                 boundConfig = cfg
                 lastForeground = foreground
                 startOrResumeSession(foreground)
-                // Resume an AutoTDP binding without re-snapshotting (boundPackage is already set, so
-                // the pre-crash restore snapshot stands).
-                if (PerAppConfig.isAuto(cfg.profileBinding)) startAutoTdp(foreground, cfg)
+                // Resume AutoTDP without re-snapshotting (boundPackage is already set, so the pre-crash
+                // restore snapshot stands). This uses the same policy as foreground entry and Quick Access,
+                // including following-global games with no explicit performance binding.
+                if (binding.autoTdpEnabled) {
+                    startAutoTdp(foreground, cfg)
+                }
             } else {
                 transitionMutex.withLock { restoreSnapshot() }
             }
@@ -1456,7 +1468,11 @@ class ForegroundAppMonitorService : Service() {
         overlayProfileLabel = "AutoTDP"
         // Only announce explicit per-app AutoTDP bindings — the global default would spam on every
         // app switch.
-        if (config != null && container.perAppConfigStorage.switchNotices.first()) {
+        if (
+            config != null &&
+            PerAppConfig.isAuto(config.profileBinding) &&
+            container.perAppConfigStorage.switchNotices.first()
+        ) {
             val appName = config.appLabel.takeIf { it.isNotBlank() } ?: pkg
             showToast("PULSE · $appName: AutoTDP")
             updateNotification("$appName: AutoTDP")
@@ -1693,14 +1709,18 @@ class ForegroundAppMonitorService : Service() {
 
     private fun hideOverlay() {
         overlay.hide()
-        overlayDrawEma = null
-        overlayChargeEma = null
-        overlayMinutesEma = null
-        overlayMinutesDischarging = null
+        resetOverlayAverages()
         overlayProfileLabel = ""
         // Policies are kept (stable, and AutoTDP may still need them); FPS is stopped by the caller
         // when the game is truly gone. The session timer is NOT reset here — it pauses on leaving
         // the game and resumes when the same game returns (see startOrResumeSession / pauseSession).
+    }
+
+    private fun resetOverlayAverages() {
+        overlayDrawEma = null
+        overlayChargeEma = null
+        overlayMinutesEma = null
+        overlayMinutesDischarging = null
     }
 
     /**
@@ -1774,55 +1794,70 @@ class ForegroundAppMonitorService : Service() {
         transitionMutex.withLock {
             val config = container.perAppConfigStorage.configs.first()
                 .firstOrNull { it.packageName == foreground }
-            // Global default: AutoTDP also engages for any foreground app (except PULSE + the home
-            // screen) when the user turned it on — games, emulators, and media alike.
-            // An app explicitly toggled to AUTO_OFF runs NO AutoTDP — it must behave like a neutral app even
-            // when the global default is on (QA bug #1 device half). An AUTO_OFF config still engages only if it
-            // carries a fan/refresh extra (applyConfig applies those; its AUTO_OFF "profile" is skipped there).
-            val explicitlyOff = config != null && PerAppConfig.isAutoOff(config.profileBinding)
-            val configEngages = config != null &&
-                !(explicitlyOff && config.fanMode == null && config.refreshRateHz == null)
-            val autoDefault = config == null &&
-                container.settingsStorage.settings.first().autoTdpDefaultEnabled &&
-                isGlobalAutoTdpTarget(foreground)
-            val engages = configEngages || autoDefault
-            when {
-                engages && (boundPackage != foreground || force) -> {
+            val binding = resolveAutoTdpBinding(
+                config = config,
+                globalAutoTdpEnabled = container.settingsStorage.settings.first().autoTdpDefaultEnabled,
+                eligibleForGlobalAutoTdp = isGlobalAutoTdpTarget(foreground),
+            )
+            val engages = binding != AutoTdpBindingKind.NONE
+            val transition = planForegroundBindingTransition(
+                currentPackage = boundPackage,
+                nextPackage = foreground,
+                nextConfig = config,
+                originalState = container.perAppConfigStorage.restoreState.first(),
+                engages = engages,
+                force = force,
+            )
+            if (transition.flushOutgoingDraw) {
+                persistMeasuredDraw()
+            }
+            when (transition.kind) {
+                ForegroundBindingTransition.Kind.REBIND -> {
                     // Release any prior AutoTDP session first (e.g. switching directly between apps).
                     stopAutoTdp()
                     clearBoundReassert() // drop any prior Custom/tier cap-hold + its locks before re-binding
                     val firstEntry = boundPackage == null
-                    when {
-                        config != null && PerAppConfig.isAuto(config.profileBinding) ->
-                            startAutoTdp(foreground, config)
-                        config != null -> {
+                    when (binding) {
+                        AutoTdpBindingKind.EXPLICIT_AUTOTDP ->
+                            startAutoTdp(foreground, checkNotNull(config))
+                        AutoTdpBindingKind.EXPLICIT_CONFIG -> {
+                            val explicitConfig = checkNotNull(config)
                             // Snapshot only when entering from unbound; switching between two bound
                             // apps keeps the original pre-launch snapshot.
-                            if (firstEntry) snapshotCurrentState(config)
-                            applyConfig(config)
+                            if (firstEntry) {
+                                snapshotCurrentState()
+                            }
+                            transition.restoreFanMode?.let { fanController.setMode(it) }
+                            transition.restoreRefreshRateHz?.let { refreshRateController.setRate(it) }
+                            applyConfig(explicitConfig)
                             // GOVERNOR LEAK fix: AutoTDP forces Balanced and tiers/Custom set their own, but a
                             // DISPLAY-PROFILE (incl. Stock) or AUTO_OFF/extras-only binding applies clocks only —
                             // so on a DIRECT game→game switch it silently inherited the previous session's
                             // governor (a benchmark bound to "Stock" ran on AutoTDP's leftover Balanced; the
                             // field-reported ~8% score hit). Restore the captured pre-game governor for those.
-                            if (!firstEntry && PerAppConfig.tierFromBinding(config.profileBinding) == null) {
+                            if (!firstEntry && PerAppConfig.tierFromBinding(explicitConfig.profileBinding) == null) {
                                 container.perAppConfigStorage.restoreState.first()?.governor?.let {
                                     governorController.setGovernorRaw(ensurePolicies(), it)
                                 }
                             }
                             captureBoundReassertCaps() // Bug 9: remember the caps so we can hold them each tick
                         }
-                        else -> startAutoTdp(foreground, null) // global default
+                        AutoTdpBindingKind.GLOBAL_AUTOTDP -> startAutoTdp(foreground, config)
+                        AutoTdpBindingKind.NONE -> error("non-engaging binding entered rebind path")
                     }
                     boundPackage = foreground
                     boundConfig = config
-                    startOrResumeSession(foreground)
+                    if (transition.resetOverlayAverages) {
+                        resetOverlayAverages()
+                    }
+                    if (transition.restartSessionClock) {
+                        startOrResumeSession(foreground)
+                    }
                 }
-                !engages && boundPackage != null -> {
+                ForegroundBindingTransition.Kind.RELEASE -> {
                     // Left the bound app for a neutral one (PULSE itself or the home screen), so the
                     // tuner always shows (and edits) the general OS state, never a game's.
                     val wasExplicit = boundConfig != null
-                    persistMeasuredDraw() // final draw stats write for the session
                     pauseSession() // accrue play time; resumes if the user returns to this game
                     stopAutoTdp() // reopen clocks before restoring the pre-game snapshot
                     clearBoundReassert() // Bug 9: stop holding caps + hand their locks back to stock before restore
@@ -1832,19 +1867,19 @@ class ForegroundAppMonitorService : Service() {
                     boundConfig = null
                     hideOverlay()
                 }
+                ForegroundBindingTransition.Kind.HOLD -> Unit
             }
         }
     }
 
-    private suspend fun snapshotCurrentState(config: PerAppConfig) {
+    private suspend fun snapshotCurrentState() {
         val settings = container.settingsStorage.settings.first()
         container.perAppConfigStorage.persistRestoreState(
-            PerAppRestoreState(
+            captureInitialRestoreState(
                 values = container.repository.readCurrentValues(),
-                appliedDisplayProfileId = ProfileStateResolver.MANUAL_PROFILE_ID,
                 activeTierLabel = settings.activeTierLabel,
-                fanMode = if (config.fanMode != null) fanController.readMode() else null,
-                refreshRateHz = if (config.refreshRateHz != null) refreshRateController.readPeak() else null,
+                readFanMode = fanController::readMode,
+                readRefreshRate = refreshRateController::readPeak,
                 // Tiers/Custom re-assert a governor on apply, so capture it to restore on exit.
                 governor = ensurePolicies().firstOrNull { !it.isGpu }?.let { governorController.readGovernor(it) },
             ),
