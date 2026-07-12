@@ -69,16 +69,16 @@ class FanArbiterTest {
     @Test
     fun `autotdp falls back to vendor smart when the selected custom fan is unsupported`() {
         assertEquals(
-            false,
-            FanArbiter.usesCustomFanDuringAutoTdp(
+            true,
+            FanArbiter.shouldForceSmartDuringAutoTdp(
                 boundFanMode = FanController.CUSTOM,
                 managedFanMode = FanController.SPORT,
                 customFanSupported = false,
             ),
         )
         assertEquals(
-            true,
-            FanArbiter.usesCustomFanDuringAutoTdp(
+            false,
+            FanArbiter.shouldForceSmartDuringAutoTdp(
                 boundFanMode = FanController.CUSTOM,
                 managedFanMode = FanController.SPORT,
                 customFanSupported = true,

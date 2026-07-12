@@ -1451,7 +1451,7 @@ class ForegroundAppMonitorService : Service() {
         // Fan: force vendor Smart UNLESS the user runs the Custom fan — then reassertManagedFan keeps driving
         // their (quieter) closed-loop Custom fan during AutoTDP instead.
         if (
-            !FanArbiter.usesCustomFanDuringAutoTdp(
+            FanArbiter.shouldForceSmartDuringAutoTdp(
                 boundFanMode = config?.fanMode,
                 managedFanMode = settings.managedFanMode,
                 customFanSupported = isCustomFanSupported(),
