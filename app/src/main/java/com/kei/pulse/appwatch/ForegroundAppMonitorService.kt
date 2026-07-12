@@ -281,8 +281,14 @@ class ForegroundAppMonitorService : Service() {
             activeTierLabel = PowerTier.CUSTOM.label, // a Power Target edit is a Custom-tier edit, as in-app
             primeCoreBoostLimited = s.primeCoreBoostLimited,
         )
+        val customTuning = store.customTuning.first()
         store.persistCustomTuning(
-            store.customTuning.first().copy(powerTargetEnabled = enabled, powerTargetPercent = percent),
+            customTuning.copy(
+                sideControls = customTuning.sideControls.copy(
+                    powerTargetEnabled = enabled,
+                    powerTargetPercent = percent,
+                ),
+            ),
         )
         transitionMutex.withLock {
             if (autoTdpPackage != null) {

@@ -462,13 +462,7 @@ class TunerViewModel(
             if (_activeTier.value == PowerTier.CUSTOM) {
                 settingsStorage.persistCustomTuning(
                     CustomTuning(
-                        powerTargetEnabled = _powerTargetEnabled.value,
-                        powerTargetPercent = _powerTargetPercent.value,
-                        powerTargetCpuOnly = _powerTargetCpuOnly.value,
-                        gpuLocked = _gpuLocked.value,
-                        gpuFloorPercent = _gpuFloorPercent.value,
-                        cpuFloorPercent = _cpuFloorPercent.value,
-                        primeCoreBoostLimited = _primeCoreBoostLimited.value,
+                        sideControls = currentSideControls(),
                         // _governor holds the raw kernel name; store the option label so it
                         // round-trips back to an OPTIONS entry on restore.
                         governorLabel = GovernorController.optionForGovernor(_governor.value)?.label,
@@ -640,26 +634,29 @@ class TunerViewModel(
      * (manual freqs, Power Target, prime boost) are already restored via the saved frequency map;
      * GPU min_pwrlevel gets widened by any apply, so a lock/floor must be re-pinned here.
      */
-    private suspend fun reapplyCustomSideControls(tuning: CustomTuning) {
+    private suspend fun reapplyCustomSideControls(sideControls: SideControlState) {
         val policies = state.value.policies
         val gpu = policies.firstOrNull { it.isGpu }
         withContext(Dispatchers.IO) {
             if (gpu != null) {
                 when {
-                    tuning.gpuLocked -> gpuFloorController.lockToCurrentCap(gpu.policyPath)
-                    tuning.gpuFloorPercent > 0 ->
-                        gpuFloorController.setFloorLevel(gpu.policyPath, gpuFloorLevelFor(gpu, tuning.gpuFloorPercent))
+                    sideControls.gpuLocked -> gpuFloorController.lockToCurrentCap(gpu.policyPath)
+                    sideControls.gpuFloorPercent > 0 ->
+                        gpuFloorController.setFloorLevel(
+                            gpu.policyPath,
+                            gpuFloorLevelFor(gpu, sideControls.gpuFloorPercent),
+                        )
                 }
             }
-            if (tuning.cpuFloorPercent > 0) {
-                cpuFloorController.setFloor(policies, tuning.cpuFloorPercent)
+            if (sideControls.cpuFloorPercent > 0) {
+                cpuFloorController.setFloor(policies, sideControls.cpuFloorPercent)
             }
             // Prime Boost Limit only governs when NO Power Target caps the prime — otherwise the PT's (lower)
             // prime cap must win. Without this gate the no-turbo write (e.g. 4204800) overwrites and 444-locks
             // the prime scaling_max that applyPowerTargetValues just set (e.g. 3072000 @ 69%), so the prime
             // reads back at 4.2 GHz instead of the Power Target value. PT governs the CPU clusters whenever it's
             // on (CPU-only still caps the CPU; only the GPU is freed), so the boost limit is redundant there.
-            if (tuning.primeCoreBoostLimited && !tuning.powerTargetEnabled) {
+            if (sideControls.primeCoreBoostLimited && !sideControls.powerTargetEnabled) {
                 val prime = policies.filterNot { it.isGpu }.maxByOrNull { it.selectableMaxFreq }
                 if (prime != null) {
                     val freqs = prime.supportedFrequencies
@@ -847,6 +844,7 @@ class TunerViewModel(
             // a preset apply clears or releases (Power Target toggle, GPU lock/floor, CPU floor).
             viewModelScope.launch {
                 val tuning = settingsStorage.customTuning.first()
+                val sideControls = tuning.sideControls
                 val result = repository.restoreCustomValues()
                 edits.value = emptyMap()
                 _activeTier.value = PowerTier.CUSTOM
@@ -857,8 +855,8 @@ class TunerViewModel(
                 // value map — otherwise the prior preset's CPU freqs keep showing in the current-values readout
                 // until the PT slider is nudged (the reported bug). Mirrors the slider path, and re-persists the
                 // reduced map so any stale saved values self-heal.
-                if (tuning.powerTargetEnabled) applyPowerTargetValues(tuning.powerTargetPercent)
-                reapplyCustomSideControls(tuning)
+                if (sideControls.powerTargetEnabled) applyPowerTargetValues(sideControls.powerTargetPercent)
+                reapplyCustomSideControls(sideControls)
                 // Restore the governor the user last set in Custom (if any).
                 tuning.governorLabel?.let { label ->
                     GovernorController.OPTIONS.firstOrNull { it.label == label }?.let { option ->

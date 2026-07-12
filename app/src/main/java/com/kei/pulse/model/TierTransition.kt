@@ -48,15 +48,7 @@ object TierTransition {
      * Side-control state after switching to CUSTOM: restore every saved knob. A [CustomTuning] flag
      * with no mapping here is a restoration bug — the saved value would be silently dropped.
      */
-    fun afterCustomRestore(saved: CustomTuning): SideControlState = SideControlState(
-        powerTargetEnabled = saved.powerTargetEnabled,
-        powerTargetPercent = saved.powerTargetPercent,
-        powerTargetCpuOnly = saved.powerTargetCpuOnly,
-        gpuLocked = saved.gpuLocked,
-        gpuFloorPercent = saved.gpuFloorPercent,
-        cpuFloorPercent = saved.cpuFloorPercent,
-        primeCoreBoostLimited = saved.primeCoreBoostLimited,
-    )
+    fun afterCustomRestore(saved: CustomTuning): SideControlState = saved.sideControls
 
     // --- Individual side-control toggles (the per-control interlink matrix) ---
 
