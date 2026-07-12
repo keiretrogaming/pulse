@@ -37,6 +37,7 @@ import com.kei.pulse.model.ProfileStateResolver
 import com.kei.pulse.model.ProfileSource
 import com.kei.pulse.model.TileInteractionBehavior
 import com.kei.pulse.model.TunerState
+import com.kei.pulse.model.toSideControlState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -367,16 +368,10 @@ class TunerViewModel(
     init {
         viewModelScope.launch {
             val persisted = settingsStorage.settings.first()
-            _powerTargetEnabled.value = persisted.powerTargetEnabled
-            _powerTargetPercent.value = persisted.powerTargetPercent
-            _powerTargetCpuOnly.value = persisted.powerTargetCpuOnly
-            _gpuLocked.value = persisted.gpuLocked
-            _gpuFloorPercent.value = persisted.gpuFloorPercent
-            _cpuFloorPercent.value = persisted.cpuFloorPercent
+            applySideControls(persisted.toSideControlState())
             // Restore the active tier so the UI doesn't always reset to Custom
             PowerTier.entries.firstOrNull { it.label == persisted.activeTierLabel }
                 ?.let { _activeTier.value = it }
-            _primeCoreBoostLimited.value = persisted.primeCoreBoostLimited
             _learnedPeakW.value = persisted.learnedPeakW
             _autoTdpDefault.value = persisted.autoTdpDefaultEnabled
             _autoTdpFpsTarget.value = persisted.autoTdpFpsTarget
