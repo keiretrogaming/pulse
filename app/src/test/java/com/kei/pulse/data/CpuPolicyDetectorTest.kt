@@ -6,6 +6,36 @@ import org.junit.Test
 
 class CpuPolicyDetectorTest {
 
+    private val detector = CpuPolicyDetector(
+        privilegedReader = FakePrivilegedSysfsReader(emptyMap()),
+    )
+
+    @Test
+    fun `parses compact sysfs cpu list ranges`() {
+        assertEquals(listOf(0, 1, 2, 3, 6, 8, 9), detector.parseCpuIds("0-3,6,8-9"))
+    }
+
+    @Test
+    fun `parses mixed whitespace and comma separators`() {
+        assertEquals(listOf(0, 1, 2, 4, 6), detector.parseCpuIds(" 0-2, 4\n6 "))
+    }
+
+    @Test
+    fun `discards malformed and descending ranges without throwing`() {
+        assertEquals(listOf(5), detector.parseCpuIds("4-2,abc,1-,-3,7-8-9,5"))
+    }
+
+    @Test
+    fun `deduplicates and sorts overlapping ids and ranges`() {
+        assertEquals(listOf(1, 2, 3), detector.parseCpuIds("3,1-3,2,3"))
+    }
+
+    @Test
+    fun `returns no ids for null or blank input`() {
+        assertTrue(detector.parseCpuIds(null).isEmpty())
+        assertTrue(detector.parseCpuIds("  \n ").isEmpty())
+    }
+
     @Test
     fun `detects and sorts policies from sysfs`() {
         val fileSystem = FakeSysfsFileSystem(

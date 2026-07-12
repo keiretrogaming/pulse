@@ -90,8 +90,23 @@ class CpuPolicyDetector(
 
     internal fun parseCpuIds(raw: String?): List<Int> {
         return raw.orEmpty()
-            .split(Regex("\\s+"))
-            .mapNotNull { it.toIntOrNull() }
+            .split(Regex("[\\s,]+"))
+            .flatMap { token ->
+                val bounds = token.split('-', limit = 2)
+                when (bounds.size) {
+                    1 -> listOfNotNull(bounds[0].toIntOrNull())
+                    2 -> {
+                        val first = bounds[0].toIntOrNull()
+                        val last = bounds[1].toIntOrNull()
+                        if (first != null && last != null && first <= last) {
+                            (first..last).toList()
+                        } else {
+                            emptyList()
+                        }
+                    }
+                    else -> emptyList()
+                }
+            }
             .distinct()
             .sorted()
     }
