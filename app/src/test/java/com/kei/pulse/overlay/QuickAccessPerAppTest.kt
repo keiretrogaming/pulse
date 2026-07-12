@@ -1,5 +1,6 @@
 package com.kei.pulse.overlay
 
+import com.kei.pulse.data.FanController
 import com.kei.pulse.model.AutoTdpBias
 import com.kei.pulse.model.PerAppConfig
 import com.kei.pulse.model.RgbMode
@@ -110,6 +111,14 @@ class QuickAccessPerAppTest {
         assertFalse(QuickAccessPerApp.effectiveAutoTdpOn(null, globalDefault = false))
         // A non-AutoTDP per-app binding overrides the global default → AutoTDP is NOT on for this app.
         assertFalse(QuickAccessPerApp.effectiveAutoTdpOn(PerAppConfig(packageName = pkg, profileBinding = "tier:MAX"), globalDefault = true))
+    }
+
+    @Test
+    fun `fan-only config inherits global AutoTDP consistently with the service`() {
+        val config = PerAppConfig(packageName = pkg, fanMode = FanController.SPORT)
+
+        assertTrue(QuickAccessPerApp.effectiveAutoTdpOn(config, globalDefault = true))
+        assertFalse(QuickAccessPerApp.effectiveAutoTdpOn(config, globalDefault = false))
     }
 
     @Test

@@ -36,6 +36,7 @@ import com.kei.pulse.data.SocDetector
 import com.kei.pulse.data.TelemetryReader
 import com.kei.pulse.data.TelemetrySnapshot
 import com.kei.pulse.model.AppSettings
+import com.kei.pulse.model.AutoTdpBindingKind
 import com.kei.pulse.model.AutoTdpBias
 import com.kei.pulse.model.CustomFanGate
 import com.kei.pulse.model.CustomFanState
@@ -50,6 +51,7 @@ import com.kei.pulse.model.PerAppRestoreState
 import com.kei.pulse.model.PowerTier
 import com.kei.pulse.model.ProfileStateResolver
 import com.kei.pulse.model.RgbMode
+import com.kei.pulse.model.resolveAutoTdpBinding
 import com.kei.pulse.overlay.AutoTdpReadout
 import com.kei.pulse.overlay.ClusterReadout
 import com.kei.pulse.overlay.OverlayConfig
@@ -648,14 +650,24 @@ class ForegroundAppMonitorService : Service() {
             val cfg = foreground?.let { fg ->
                 container.perAppConfigStorage.configs.first().firstOrNull { it.packageName == fg }
             }
-            if (foreground != null && cfg != null) {
+            val binding = foreground?.let { fg ->
+                resolveAutoTdpBinding(
+                    config = cfg,
+                    globalAutoTdpEnabled = container.settingsStorage.settings.first().autoTdpDefaultEnabled,
+                    eligibleForGlobalAutoTdp = isGlobalAutoTdpTarget(fg),
+                )
+            }
+            if (foreground != null && binding != null && binding != AutoTdpBindingKind.NONE) {
                 boundPackage = foreground
                 boundConfig = cfg
                 lastForeground = foreground
                 startOrResumeSession(foreground)
-                // Resume an AutoTDP binding without re-snapshotting (boundPackage is already set, so
-                // the pre-crash restore snapshot stands).
-                if (PerAppConfig.isAuto(cfg.profileBinding)) startAutoTdp(foreground, cfg)
+                // Resume AutoTDP without re-snapshotting (boundPackage is already set, so the pre-crash
+                // restore snapshot stands). This uses the same policy as foreground entry and Quick Access,
+                // including following-global games with no explicit performance binding.
+                if (binding.autoTdpEnabled) {
+                    startAutoTdp(foreground, cfg)
+                }
             } else {
                 transitionMutex.withLock { restoreSnapshot() }
             }
@@ -1456,7 +1468,11 @@ class ForegroundAppMonitorService : Service() {
         overlayProfileLabel = "AutoTDP"
         // Only announce explicit per-app AutoTDP bindings — the global default would spam on every
         // app switch.
-        if (config != null && container.perAppConfigStorage.switchNotices.first()) {
+        if (
+            config != null &&
+            PerAppConfig.isAuto(config.profileBinding) &&
+            container.perAppConfigStorage.switchNotices.first()
+        ) {
             val appName = config.appLabel.takeIf { it.isNotBlank() } ?: pkg
             showToast("PULSE · $appName: AutoTDP")
             updateNotification("$appName: AutoTDP")
@@ -1778,12 +1794,12 @@ class ForegroundAppMonitorService : Service() {
         transitionMutex.withLock {
             val config = container.perAppConfigStorage.configs.first()
                 .firstOrNull { it.packageName == foreground }
-            val binding = resolveForegroundBinding(
+            val binding = resolveAutoTdpBinding(
                 config = config,
                 globalAutoTdpEnabled = container.settingsStorage.settings.first().autoTdpDefaultEnabled,
-                eligibleForGlobalAutoTdp = config == null && isGlobalAutoTdpTarget(foreground),
+                eligibleForGlobalAutoTdp = isGlobalAutoTdpTarget(foreground),
             )
-            val engages = binding != ForegroundBindingKind.NONE
+            val engages = binding != AutoTdpBindingKind.NONE
             val transition = planForegroundBindingTransition(
                 currentPackage = boundPackage,
                 nextPackage = foreground,
@@ -1792,7 +1808,9 @@ class ForegroundAppMonitorService : Service() {
                 engages = engages,
                 force = force,
             )
-            if (transition.flushOutgoingDraw) persistMeasuredDraw()
+            if (transition.flushOutgoingDraw) {
+                persistMeasuredDraw()
+            }
             when (transition.kind) {
                 ForegroundBindingTransition.Kind.REBIND -> {
                     // Release any prior AutoTDP session first (e.g. switching directly between apps).
@@ -1800,13 +1818,15 @@ class ForegroundAppMonitorService : Service() {
                     clearBoundReassert() // drop any prior Custom/tier cap-hold + its locks before re-binding
                     val firstEntry = boundPackage == null
                     when (binding) {
-                        ForegroundBindingKind.EXPLICIT_AUTOTDP ->
+                        AutoTdpBindingKind.EXPLICIT_AUTOTDP ->
                             startAutoTdp(foreground, checkNotNull(config))
-                        ForegroundBindingKind.EXPLICIT_CONFIG -> {
+                        AutoTdpBindingKind.EXPLICIT_CONFIG -> {
                             val explicitConfig = checkNotNull(config)
                             // Snapshot only when entering from unbound; switching between two bound
                             // apps keeps the original pre-launch snapshot.
-                            if (firstEntry) snapshotCurrentState()
+                            if (firstEntry) {
+                                snapshotCurrentState()
+                            }
                             transition.restoreFanMode?.let { fanController.setMode(it) }
                             transition.restoreRefreshRateHz?.let { refreshRateController.setRate(it) }
                             applyConfig(explicitConfig)
@@ -1822,13 +1842,17 @@ class ForegroundAppMonitorService : Service() {
                             }
                             captureBoundReassertCaps() // Bug 9: remember the caps so we can hold them each tick
                         }
-                        ForegroundBindingKind.GLOBAL_AUTOTDP -> startAutoTdp(foreground, null)
-                        ForegroundBindingKind.NONE -> error("non-engaging binding entered rebind path")
+                        AutoTdpBindingKind.GLOBAL_AUTOTDP -> startAutoTdp(foreground, config)
+                        AutoTdpBindingKind.NONE -> error("non-engaging binding entered rebind path")
                     }
                     boundPackage = foreground
                     boundConfig = config
-                    if (transition.resetOverlayAverages) resetOverlayAverages()
-                    if (transition.restartSessionClock) startOrResumeSession(foreground)
+                    if (transition.resetOverlayAverages) {
+                        resetOverlayAverages()
+                    }
+                    if (transition.restartSessionClock) {
+                        startOrResumeSession(foreground)
+                    }
                 }
                 ForegroundBindingTransition.Kind.RELEASE -> {
                     // Left the bound app for a neutral one (PULSE itself or the home screen), so the

@@ -2,6 +2,7 @@ package com.kei.pulse.overlay
 
 import com.kei.pulse.model.AutoTdpBias
 import com.kei.pulse.model.PerAppConfig
+import com.kei.pulse.model.resolveAutoTdpBinding
 
 /**
  * Per-app targeting for the Quick Access bar. The AutoTDP controls edit the FOREGROUND game's
@@ -65,12 +66,11 @@ object QuickAccessPerApp {
 
     /** Whether AutoTDP is effectively on for the game: an explicit per-app binding wins, else the global. */
     fun effectiveAutoTdpOn(config: PerAppConfig?, globalDefault: Boolean): Boolean =
-        when (config?.profileBinding) {
-            PerAppConfig.AUTO_BINDING -> true
-            PerAppConfig.AUTO_OFF_BINDING -> false // explicit per-app off overrides the global default
-            null -> globalDefault                  // inherit the global
-            else -> false                          // a tier/Custom binding ⇒ AutoTDP not active for this app
-        }
+        resolveAutoTdpBinding(
+            config = config,
+            globalAutoTdpEnabled = globalDefault,
+            eligibleForGlobalAutoTdp = true,
+        ).autoTdpEnabled
 
     /** The game's effective AutoTDP fps target — its per-app value, else the global default. */
     fun effectiveFps(config: PerAppConfig?, globalFps: Int): Int = config?.fpsTarget ?: globalFps
