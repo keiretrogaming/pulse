@@ -446,15 +446,10 @@ class TunerViewModel(
 
     private fun persistTuning() {
         viewModelScope.launch {
+            val sideControls = currentSideControls()
             settingsStorage.persistTuningState(
-                powerTargetEnabled = _powerTargetEnabled.value,
-                powerTargetPercent = _powerTargetPercent.value,
-                powerTargetCpuOnly = _powerTargetCpuOnly.value,
-                gpuLocked = _gpuLocked.value,
-                gpuFloorPercent = _gpuFloorPercent.value,
-                cpuFloorPercent = _cpuFloorPercent.value,
+                sideControls = sideControls,
                 activeTierLabel = _activeTier.value.label,
-                primeCoreBoostLimited = _primeCoreBoostLimited.value,
             )
             // Snapshot the tuning knobs only while Custom is the active tier. Preset applies set
             // the tier to the preset before calling this, so they can't overwrite the Custom
@@ -462,7 +457,7 @@ class TunerViewModel(
             if (_activeTier.value == PowerTier.CUSTOM) {
                 settingsStorage.persistCustomTuning(
                     CustomTuning(
-                        sideControls = currentSideControls(),
+                        sideControls = sideControls,
                         // _governor holds the raw kernel name; store the option label so it
                         // round-trips back to an OPTIONS entry on restore.
                         governorLabel = GovernorController.optionForGovernor(_governor.value)?.label,

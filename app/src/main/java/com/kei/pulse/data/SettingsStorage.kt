@@ -475,24 +475,18 @@ class SettingsStorage(private val context: Context) {
     }
 
     suspend fun persistTuningState(
-        powerTargetEnabled: Boolean,
-        powerTargetPercent: Int,
-        powerTargetCpuOnly: Boolean,
-        gpuLocked: Boolean,
-        gpuFloorPercent: Int,
-        cpuFloorPercent: Int,
+        sideControls: SideControlState,
         activeTierLabel: String,
-        primeCoreBoostLimited: Boolean,
     ) {
         withContext(NonCancellable) { context.settingsDataStore.edit { preferences ->
-            preferences[powerTargetEnabledKey] = powerTargetEnabled
-            preferences[powerTargetPercentKey] = powerTargetPercent
-            preferences[powerTargetCpuOnlyKey] = powerTargetCpuOnly
-            preferences[gpuLockedKey] = gpuLocked
-            preferences[gpuFloorPercentKey] = gpuFloorPercent
-            preferences[cpuFloorPercentKey] = cpuFloorPercent
+            preferences[powerTargetEnabledKey] = sideControls.powerTargetEnabled
+            preferences[powerTargetPercentKey] = sideControls.powerTargetPercent
+            preferences[powerTargetCpuOnlyKey] = sideControls.powerTargetCpuOnly
+            preferences[gpuLockedKey] = sideControls.gpuLocked
+            preferences[gpuFloorPercentKey] = sideControls.gpuFloorPercent
+            preferences[cpuFloorPercentKey] = sideControls.cpuFloorPercent
             preferences[activeTierKey] = activeTierLabel
-            preferences[primeCoreBoostKey] = primeCoreBoostLimited
+            preferences[primeCoreBoostKey] = sideControls.primeCoreBoostLimited
         } }
     }
 
