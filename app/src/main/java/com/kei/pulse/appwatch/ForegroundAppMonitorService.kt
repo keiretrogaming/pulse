@@ -38,7 +38,6 @@ import com.kei.pulse.data.TelemetrySnapshot
 import com.kei.pulse.model.AppSettings
 import com.kei.pulse.model.AutoTdpBias
 import com.kei.pulse.model.CustomFanGate
-import com.kei.pulse.model.toSideControlState
 import com.kei.pulse.model.CustomFanState
 import com.kei.pulse.model.DeviceProfiles
 import com.kei.pulse.model.FanAction
@@ -272,23 +271,17 @@ class ForegroundAppMonitorService : Service() {
     private suspend fun applyQaPowerTarget(percent: Int, enabled: Boolean) {
         val store = container.settingsStorage
         val s = store.settings.first()
-        val sideControls = s.toSideControlState().copy(
-            powerTargetEnabled = enabled,
-            powerTargetPercent = percent,
+        val persistence = resolveQuickAccessPowerTargetPersistence(
+            settings = s,
+            customTuning = store.customTuning.first(),
+            percent = percent,
+            enabled = enabled,
         )
         store.persistTuningState(
-            sideControls = sideControls,
+            sideControls = persistence.liveSideControls,
             activeTierLabel = PowerTier.CUSTOM.label, // a Power Target edit is a Custom-tier edit, as in-app
         )
-        val customTuning = store.customTuning.first()
-        store.persistCustomTuning(
-            customTuning.copy(
-                sideControls = customTuning.sideControls.copy(
-                    powerTargetEnabled = enabled,
-                    powerTargetPercent = percent,
-                ),
-            ),
-        )
+        store.persistCustomTuning(persistence.customTuning)
         transitionMutex.withLock {
             if (autoTdpPackage != null) {
                 android.util.Log.i("PulseQA", "SetPowerTarget $percent% persisted only — AutoTDP owns the clocks")
