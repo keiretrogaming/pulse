@@ -175,3 +175,25 @@ data class AppSettings(
     val rgbManualRightColor: Int = 0xFF3F6BFF.toInt(),
     val rgbManualRightBrightness: Float = 1f,
 )
+
+/** Flattened settings boundary for the seven side-controls that always travel together. */
+fun AppSettings.toSideControlState(): SideControlState = SideControlState(
+    powerTargetEnabled = powerTargetEnabled,
+    powerTargetPercent = powerTargetPercent,
+    powerTargetCpuOnly = powerTargetCpuOnly,
+    gpuLocked = gpuLocked,
+    gpuFloorPercent = gpuFloorPercent,
+    cpuFloorPercent = cpuFloorPercent,
+    primeCoreBoostLimited = primeCoreBoostLimited,
+)
+
+/** Replace all seven flattened side-controls while preserving every unrelated setting. */
+fun AppSettings.withSideControls(sideControls: SideControlState): AppSettings = copy(
+    powerTargetEnabled = sideControls.powerTargetEnabled,
+    powerTargetPercent = sideControls.powerTargetPercent,
+    powerTargetCpuOnly = sideControls.powerTargetCpuOnly,
+    gpuLocked = sideControls.gpuLocked,
+    gpuFloorPercent = sideControls.gpuFloorPercent,
+    cpuFloorPercent = sideControls.cpuFloorPercent,
+    primeCoreBoostLimited = sideControls.primeCoreBoostLimited,
+)
