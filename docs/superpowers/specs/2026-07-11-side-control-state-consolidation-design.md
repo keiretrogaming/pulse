@@ -92,7 +92,7 @@ No device-controller calls or coroutine ordering change.
 
 Quick Access continues to receive and reduce `AppSettings`. Any side-control edit uses `toSideControlState()`, copies the changed field on that value, and uses `withSideControls()` when an updated `AppSettings` is needed.
 
-The foreground service passes the complete canonical value to `persistTuningState()` and updates the Custom snapshot with the same value. Its existing clock-write, AutoTDP guard, bound-cap recapture, and logging behavior remain unchanged.
+The foreground service passes the complete live canonical value to `persistTuningState()`. It updates only the edited fields on the independently saved Custom snapshot, preserving Custom GPU/floor/boost values that a live preset may have cleared. Its existing clock-write, AutoTDP guard, bound-cap recapture, and logging behavior remain unchanged.
 
 ## Testing
 
