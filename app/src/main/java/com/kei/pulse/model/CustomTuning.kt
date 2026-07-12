@@ -7,13 +7,7 @@ package com.kei.pulse.model
  * when the user cycles back to Custom from a preset.
  */
 data class CustomTuning(
-    val powerTargetEnabled: Boolean = false,
-    val powerTargetPercent: Int = 100,
-    val powerTargetCpuOnly: Boolean = false,
-    val gpuLocked: Boolean = false,
-    val gpuFloorPercent: Int = 0,
-    val cpuFloorPercent: Int = 0,
-    val primeCoreBoostLimited: Boolean = false,
+    val sideControls: SideControlState = SideControlState(),
     /** GovernorController.OPTIONS label the user last chose while in Custom; null = leave alone. */
     val governorLabel: String? = null,
 )

@@ -271,19 +271,17 @@ class ForegroundAppMonitorService : Service() {
     private suspend fun applyQaPowerTarget(percent: Int, enabled: Boolean) {
         val store = container.settingsStorage
         val s = store.settings.first()
+        val persistence = resolveQuickAccessPowerTargetPersistence(
+            settings = s,
+            customTuning = store.customTuning.first(),
+            percent = percent,
+            enabled = enabled,
+        )
         store.persistTuningState(
-            powerTargetEnabled = enabled,
-            powerTargetPercent = percent,
-            powerTargetCpuOnly = s.powerTargetCpuOnly,
-            gpuLocked = s.gpuLocked,
-            gpuFloorPercent = s.gpuFloorPercent,
-            cpuFloorPercent = s.cpuFloorPercent,
+            sideControls = persistence.liveSideControls,
             activeTierLabel = PowerTier.CUSTOM.label, // a Power Target edit is a Custom-tier edit, as in-app
-            primeCoreBoostLimited = s.primeCoreBoostLimited,
         )
-        store.persistCustomTuning(
-            store.customTuning.first().copy(powerTargetEnabled = enabled, powerTargetPercent = percent),
-        )
+        store.persistCustomTuning(persistence.customTuning)
         transitionMutex.withLock {
             if (autoTdpPackage != null) {
                 android.util.Log.i("PulseQA", "SetPowerTarget $percent% persisted only — AutoTDP owns the clocks")

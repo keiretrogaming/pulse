@@ -3,6 +3,7 @@ package com.kei.pulse.overlay
 import com.kei.pulse.data.FanController
 import com.kei.pulse.model.AppSettings
 import com.kei.pulse.model.AutoTdpBias
+import com.kei.pulse.model.toSideControlState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -56,10 +57,21 @@ class QuickAccessStateTest {
     }
 
     @Test
-    fun `set power target enables the cap and stores the percent`() {
-        val r = QuickAccess.reduce(base, QuickAccessAction.SetPowerTarget(85))
-        assertTrue(r.powerTargetEnabled)
-        assertEquals(85, r.powerTargetPercent)
+    fun `set power target changes only cap enablement and percent`() {
+        val before = base.copy(
+            powerTargetCpuOnly = true,
+            gpuLocked = true,
+            gpuFloorPercent = 41,
+            cpuFloorPercent = 29,
+            primeCoreBoostLimited = true,
+        )
+
+        val result = QuickAccess.reduce(before, QuickAccessAction.SetPowerTarget(85))
+
+        assertEquals(
+            before.toSideControlState().copy(powerTargetEnabled = true, powerTargetPercent = 85),
+            result.toSideControlState(),
+        )
     }
 
     @Test

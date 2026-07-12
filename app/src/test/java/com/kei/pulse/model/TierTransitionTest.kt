@@ -46,25 +46,11 @@ class TierTransitionTest {
     }
 
     @Test
-    fun `custom restore copies every saved knob`() {
-        val saved = CustomTuning(
-            powerTargetEnabled = true,
-            powerTargetPercent = 72,
-            powerTargetCpuOnly = true,
-            gpuLocked = true,
-            gpuFloorPercent = 55,
-            cpuFloorPercent = 25,
-            primeCoreBoostLimited = true,
-            governorLabel = "Performance",
-        )
-        val after = TierTransition.afterCustomRestore(saved)
-        assertEquals(saved.powerTargetEnabled, after.powerTargetEnabled)
-        assertEquals(saved.powerTargetPercent, after.powerTargetPercent)
-        assertEquals(saved.powerTargetCpuOnly, after.powerTargetCpuOnly)
-        assertEquals(saved.gpuLocked, after.gpuLocked)
-        assertEquals(saved.gpuFloorPercent, after.gpuFloorPercent)
-        assertEquals(saved.cpuFloorPercent, after.cpuFloorPercent)
-        assertEquals(saved.primeCoreBoostLimited, after.primeCoreBoostLimited)
+    fun `custom restore returns the complete saved side-control snapshot`() {
+        val saved = CustomTuning(sideControls = engaged, governorLabel = "Performance")
+
+        assertEquals(engaged, TierTransition.afterCustomRestore(saved))
+        assertEquals("Performance", saved.governorLabel)
     }
 
     @Test

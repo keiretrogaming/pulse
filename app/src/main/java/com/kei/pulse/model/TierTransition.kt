@@ -13,25 +13,17 @@ package com.kei.pulse.model
  * path (it is not a plain flag), so it is intentionally not modeled here.
  */
 data class SideControlState(
-    val powerTargetEnabled: Boolean,
-    val powerTargetPercent: Int,
-    val powerTargetCpuOnly: Boolean,
-    val gpuLocked: Boolean,
-    val gpuFloorPercent: Int,
-    val cpuFloorPercent: Int,
-    val primeCoreBoostLimited: Boolean,
+    val powerTargetEnabled: Boolean = false,
+    val powerTargetPercent: Int = 100,
+    val powerTargetCpuOnly: Boolean = false,
+    val gpuLocked: Boolean = false,
+    val gpuFloorPercent: Int = 0,
+    val cpuFloorPercent: Int = 0,
+    val primeCoreBoostLimited: Boolean = false,
 ) {
     companion object {
         /** All side-controls at their neutral defaults (nothing governing). */
-        val CLEARED = SideControlState(
-            powerTargetEnabled = false,
-            powerTargetPercent = 100,
-            powerTargetCpuOnly = false,
-            gpuLocked = false,
-            gpuFloorPercent = 0,
-            cpuFloorPercent = 0,
-            primeCoreBoostLimited = false,
-        )
+        val CLEARED = SideControlState()
     }
 }
 
@@ -56,15 +48,7 @@ object TierTransition {
      * Side-control state after switching to CUSTOM: restore every saved knob. A [CustomTuning] flag
      * with no mapping here is a restoration bug — the saved value would be silently dropped.
      */
-    fun afterCustomRestore(saved: CustomTuning): SideControlState = SideControlState(
-        powerTargetEnabled = saved.powerTargetEnabled,
-        powerTargetPercent = saved.powerTargetPercent,
-        powerTargetCpuOnly = saved.powerTargetCpuOnly,
-        gpuLocked = saved.gpuLocked,
-        gpuFloorPercent = saved.gpuFloorPercent,
-        cpuFloorPercent = saved.cpuFloorPercent,
-        primeCoreBoostLimited = saved.primeCoreBoostLimited,
-    )
+    fun afterCustomRestore(saved: CustomTuning): SideControlState = saved.sideControls
 
     // --- Individual side-control toggles (the per-control interlink matrix) ---
 

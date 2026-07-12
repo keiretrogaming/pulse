@@ -7,6 +7,8 @@ import com.kei.pulse.model.FanTempController
 import com.kei.pulse.model.OverlayPreset
 import com.kei.pulse.model.PowerTier
 import com.kei.pulse.model.RgbMode
+import com.kei.pulse.model.toSideControlState
+import com.kei.pulse.model.withSideControls
 
 /** Rail tabs for the Quick Access Bar. */
 enum class QuickAccessTab { PERFORMANCE, FAN, RGB, OVERLAY, SYSTEM }
@@ -70,7 +72,12 @@ object QuickAccess {
             // Wired (2026-07-03): the service's applyQaPowerTarget computes the caps via the shared
             // PowerTargetMath and applies them with persistAsCustom — same path as the in-app slider.
             val pct = action.percent.coerceIn(POWER_TARGET_MIN, POWER_TARGET_MAX)
-            settings.copy(powerTargetPercent = pct, powerTargetEnabled = pct < POWER_TARGET_MAX)
+            settings.withSideControls(
+                settings.toSideControlState().copy(
+                    powerTargetPercent = pct,
+                    powerTargetEnabled = pct < POWER_TARGET_MAX,
+                ),
+            )
         }
         is QuickAccessAction.SetGpuCap ->
             settings // device + Custom-tuning write (applyQaGpuCap); not an AppSettings field

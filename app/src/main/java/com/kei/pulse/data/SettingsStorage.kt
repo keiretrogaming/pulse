@@ -17,6 +17,7 @@ import com.kei.pulse.model.OverlayPreset
 import com.kei.pulse.model.AutoTdpBias
 import com.kei.pulse.model.RgbMode
 import com.kei.pulse.model.RgbStick
+import com.kei.pulse.model.SideControlState
 import com.kei.pulse.model.PulseThemeId
 import com.kei.pulse.model.TileInteractionBehavior
 import kotlinx.coroutines.flow.Flow
@@ -43,15 +44,8 @@ class SettingsStorage(private val context: Context) {
     private val themeIdKey = stringPreferencesKey("theme_id")
     private val colorSourceKey = stringPreferencesKey("color_source")
     private val accentColorKey = intPreferencesKey("accent_color")
-    private val powerTargetEnabledKey = booleanPreferencesKey("power_target_enabled")
-    private val powerTargetPercentKey = intPreferencesKey("power_target_percent")
-    private val powerTargetCpuOnlyKey = booleanPreferencesKey("power_target_cpu_only")
-    private val gpuLockedKey = booleanPreferencesKey("gpu_locked")
-    private val gpuFloorPercentKey = intPreferencesKey("gpu_floor_percent")
-    private val cpuFloorPercentKey = intPreferencesKey("cpu_floor_percent")
     private val managedFanModeKey = intPreferencesKey("managed_fan_mode")
     private val activeTierKey = stringPreferencesKey("active_tier_label")
-    private val primeCoreBoostKey = booleanPreferencesKey("prime_core_boost_limited")
     private val learnedPeakKey = floatPreferencesKey("learned_peak_w")
     private val autoTdpDefaultKey = booleanPreferencesKey("auto_tdp_default_enabled")
     private val autoTdpFpsTargetKey = intPreferencesKey("auto_tdp_fps_target")
@@ -88,16 +82,10 @@ class SettingsStorage(private val context: Context) {
     private val rgbManualRightBrightnessKey = floatPreferencesKey("rgb_manual_right_brightness")
 
     // Custom-mode snapshot: preserved across preset applies so cycling back to Custom restores it.
-    private val customPtEnabledKey = booleanPreferencesKey("custom_pt_enabled")
-    private val customPtPercentKey = intPreferencesKey("custom_pt_percent")
-    private val customPtCpuOnlyKey = booleanPreferencesKey("custom_pt_cpu_only")
-    private val customGpuLockedKey = booleanPreferencesKey("custom_gpu_locked")
-    private val customGpuFloorKey = intPreferencesKey("custom_gpu_floor_percent")
-    private val customCpuFloorKey = intPreferencesKey("custom_cpu_floor_percent")
-    private val customPrimeBoostKey = booleanPreferencesKey("custom_prime_core_boost")
     private val customGovernorLabelKey = stringPreferencesKey("custom_governor_label")
 
     val settings: Flow<AppSettings> = context.settingsDataStore.data.map { preferences ->
+        val sideControls = preferences.readSideControls(LIVE_SIDE_CONTROL_KEYS)
         AppSettings(
             themeId = preferences[themeIdKey]?.let(::parseThemeId) ?: PulseThemeId.SIGNAL,
             colorSource = preferences[colorSourceKey]
@@ -114,15 +102,15 @@ class SettingsStorage(private val context: Context) {
             hasPromptedQuickSettingsTile = preferences[quickSettingsTilePromptShownKey] ?: false,
             isQuickSettingsTileAdded = preferences[quickSettingsTileAddedKey] ?: false,
             batteryOptPromptShown = preferences[batteryOptPromptShownKey] ?: false,
-            powerTargetEnabled = preferences[powerTargetEnabledKey] ?: false,
-            powerTargetPercent = preferences[powerTargetPercentKey] ?: 100,
-            powerTargetCpuOnly = preferences[powerTargetCpuOnlyKey] ?: false,
-            gpuLocked = preferences[gpuLockedKey] ?: false,
-            gpuFloorPercent = preferences[gpuFloorPercentKey] ?: 0,
-            cpuFloorPercent = preferences[cpuFloorPercentKey] ?: 0,
+            powerTargetEnabled = sideControls.powerTargetEnabled,
+            powerTargetPercent = sideControls.powerTargetPercent,
+            powerTargetCpuOnly = sideControls.powerTargetCpuOnly,
+            gpuLocked = sideControls.gpuLocked,
+            gpuFloorPercent = sideControls.gpuFloorPercent,
+            cpuFloorPercent = sideControls.cpuFloorPercent,
             managedFanMode = preferences[managedFanModeKey],
             activeTierLabel = preferences[activeTierKey] ?: "Custom",
-            primeCoreBoostLimited = preferences[primeCoreBoostKey] ?: false,
+            primeCoreBoostLimited = sideControls.primeCoreBoostLimited,
             learnedPeakW = preferences[learnedPeakKey] ?: 0f,
             autoTdpDefaultEnabled = preferences[autoTdpDefaultKey] ?: false,
             autoTdpFpsTarget = preferences[autoTdpFpsTargetKey] ?: 60,
@@ -355,26 +343,14 @@ class SettingsStorage(private val context: Context) {
 
     val customTuning: Flow<CustomTuning> = context.settingsDataStore.data.map { preferences ->
         CustomTuning(
-            powerTargetEnabled = preferences[customPtEnabledKey] ?: false,
-            powerTargetPercent = preferences[customPtPercentKey] ?: 100,
-            powerTargetCpuOnly = preferences[customPtCpuOnlyKey] ?: false,
-            gpuLocked = preferences[customGpuLockedKey] ?: false,
-            gpuFloorPercent = preferences[customGpuFloorKey] ?: 0,
-            cpuFloorPercent = preferences[customCpuFloorKey] ?: 0,
-            primeCoreBoostLimited = preferences[customPrimeBoostKey] ?: false,
+            sideControls = preferences.readSideControls(CUSTOM_SIDE_CONTROL_KEYS),
             governorLabel = preferences[customGovernorLabelKey],
         )
     }
 
     suspend fun persistCustomTuning(tuning: CustomTuning) {
         withContext(NonCancellable) { context.settingsDataStore.edit { preferences ->
-            preferences[customPtEnabledKey] = tuning.powerTargetEnabled
-            preferences[customPtPercentKey] = tuning.powerTargetPercent
-            preferences[customPtCpuOnlyKey] = tuning.powerTargetCpuOnly
-            preferences[customGpuLockedKey] = tuning.gpuLocked
-            preferences[customGpuFloorKey] = tuning.gpuFloorPercent
-            preferences[customCpuFloorKey] = tuning.cpuFloorPercent
-            preferences[customPrimeBoostKey] = tuning.primeCoreBoostLimited
+            preferences.putSideControls(CUSTOM_SIDE_CONTROL_KEYS, tuning.sideControls)
             // Preferences DataStore can't hold null — remove the key when no governor is remembered.
             tuning.governorLabel
                 ?.let { preferences[customGovernorLabelKey] = it }
@@ -471,24 +447,12 @@ class SettingsStorage(private val context: Context) {
     }
 
     suspend fun persistTuningState(
-        powerTargetEnabled: Boolean,
-        powerTargetPercent: Int,
-        powerTargetCpuOnly: Boolean,
-        gpuLocked: Boolean,
-        gpuFloorPercent: Int,
-        cpuFloorPercent: Int,
+        sideControls: SideControlState,
         activeTierLabel: String,
-        primeCoreBoostLimited: Boolean,
     ) {
         withContext(NonCancellable) { context.settingsDataStore.edit { preferences ->
-            preferences[powerTargetEnabledKey] = powerTargetEnabled
-            preferences[powerTargetPercentKey] = powerTargetPercent
-            preferences[powerTargetCpuOnlyKey] = powerTargetCpuOnly
-            preferences[gpuLockedKey] = gpuLocked
-            preferences[gpuFloorPercentKey] = gpuFloorPercent
-            preferences[cpuFloorPercentKey] = cpuFloorPercent
+            preferences.putSideControls(LIVE_SIDE_CONTROL_KEYS, sideControls)
             preferences[activeTierKey] = activeTierLabel
-            preferences[primeCoreBoostKey] = primeCoreBoostLimited
         } }
     }
 
