@@ -1,6 +1,5 @@
 package com.kei.pulse.overlay
 
-import com.kei.pulse.model.AutoTdpBias
 import com.kei.pulse.model.PerAppConfig
 
 /**
@@ -72,13 +71,4 @@ object QuickAccessPerApp {
             else -> false                          // a tier/Custom binding ⇒ AutoTDP not active for this app
         }
 
-    /** The game's effective AutoTDP fps target — its per-app value, else the global default. */
-    fun effectiveFps(config: PerAppConfig?, globalFps: Int): Int = config?.fpsTarget ?: globalFps
-
-    /** The game's effective AutoTDP bias — its per-app value, else the global default. */
-    fun effectiveBias(config: PerAppConfig?, globalDefault: AutoTdpBias): AutoTdpBias = config?.bias ?: globalDefault
-
-    /** The game's effective aggressive-park setting — its per-app value, else the global default. */
-    fun effectiveAggressivePark(config: PerAppConfig?, globalDefault: Boolean): Boolean =
-        config?.aggressivePark ?: globalDefault
 }

@@ -128,20 +128,4 @@ class QuickAccessPerAppTest {
         )
     }
 
-    @Test
-    fun `effective bias and park fall back to the global when the config has none`() {
-        assertEquals(AutoTdpBias.SMOOTH, QuickAccessPerApp.effectiveBias(PerAppConfig(packageName = pkg, bias = AutoTdpBias.SMOOTH), AutoTdpBias.EFFICIENT))
-        assertEquals(AutoTdpBias.EFFICIENT, QuickAccessPerApp.effectiveBias(PerAppConfig(packageName = pkg, bias = null), AutoTdpBias.EFFICIENT))
-        assertEquals(AutoTdpBias.EFFICIENT, QuickAccessPerApp.effectiveBias(null, AutoTdpBias.EFFICIENT))
-        assertTrue(QuickAccessPerApp.effectiveAggressivePark(PerAppConfig(packageName = pkg, aggressivePark = true), globalDefault = false))
-        assertFalse(QuickAccessPerApp.effectiveAggressivePark(PerAppConfig(packageName = pkg, aggressivePark = null), globalDefault = false))
-        assertTrue(QuickAccessPerApp.effectiveAggressivePark(null, globalDefault = true))
-    }
-
-    @Test
-    fun `effective values fall back to the global when the config has none`() {
-        assertEquals(120, QuickAccessPerApp.effectiveFps(PerAppConfig(packageName = pkg, fpsTarget = 120), globalFps = 60))
-        assertEquals(60, QuickAccessPerApp.effectiveFps(PerAppConfig(packageName = pkg, fpsTarget = null), globalFps = 60))
-        assertEquals(60, QuickAccessPerApp.effectiveFps(null, globalFps = 60))
-    }
 }

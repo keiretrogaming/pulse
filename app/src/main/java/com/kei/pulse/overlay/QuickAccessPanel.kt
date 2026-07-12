@@ -64,6 +64,7 @@ import com.kei.pulse.model.OverlayPreset
 import com.kei.pulse.model.PerAppConfig
 import com.kei.pulse.model.PowerTier
 import com.kei.pulse.model.RgbMode
+import com.kei.pulse.model.resolveEffectiveAutoTdpValues
 import kotlinx.coroutines.flow.SharedFlow
 import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.StateFlow
@@ -357,16 +358,31 @@ private fun performanceItems(
         }
     }
     if (autoOn) {
-        val fps = if (perGame) QuickAccessPerApp.effectiveFps(perApp, settings.autoTdpFpsTarget) else settings.autoTdpFpsTarget
-        items += chipNavItem("Frame target", FPS_OPTIONS.map { it.toString() }, FPS_OPTIONS.indexOf(fps)) { i ->
+        val effective = resolveEffectiveAutoTdpValues(
+            config = if (perGame) {
+                perApp
+            } else {
+                null
+            },
+            global = settings,
+        )
+        items += chipNavItem(
+            "Frame target",
+            FPS_OPTIONS.map { it.toString() },
+            FPS_OPTIONS.indexOf(effective.fpsTarget),
+        ) { i ->
             onAction(QuickAccessAction.SetFpsTarget(FPS_OPTIONS[i]))
         }
-        val bias = if (perGame) QuickAccessPerApp.effectiveBias(perApp, settings.autoTdpBias) else settings.autoTdpBias
-        items += chipNavItem("Bias", AutoTdpBias.entries.map { biasLabel(it) }, AutoTdpBias.entries.indexOf(bias)) { i ->
+        items += chipNavItem(
+            "Bias",
+            AutoTdpBias.entries.map { biasLabel(it) },
+            AutoTdpBias.entries.indexOf(effective.bias),
+        ) { i ->
             onAction(QuickAccessAction.SetBias(AutoTdpBias.entries[i]))
         }
-        val park = if (perGame) QuickAccessPerApp.effectiveAggressivePark(perApp, settings.autoTdpAggressivePark) else settings.autoTdpAggressivePark
-        items += toggleNavItem("Aggressive park", park) { onAction(QuickAccessAction.SetAggressivePark(!park)) }
+        items += toggleNavItem("Aggressive park", effective.aggressivePark) {
+            onAction(QuickAccessAction.SetAggressivePark(!effective.aggressivePark))
+        }
     }
     return items
 }
