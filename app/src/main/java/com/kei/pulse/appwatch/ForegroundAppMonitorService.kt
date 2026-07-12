@@ -1450,8 +1450,15 @@ class ForegroundAppMonitorService : Service() {
         autoTdpTick = 0
         // Fan: force vendor Smart UNLESS the user runs the Custom fan — then reassertManagedFan keeps driving
         // their (quieter) closed-loop Custom fan during AutoTDP instead.
-        val desiredFanMode = FanArbiter.desiredMode(config?.fanMode, settings.managedFanMode)
-        if (desiredFanMode != FanController.CUSTOM) fanController.setMode(FanController.SMART)
+        if (
+            !FanArbiter.usesCustomFanDuringAutoTdp(
+                boundFanMode = config?.fanMode,
+                managedFanMode = settings.managedFanMode,
+                customFanSupported = isCustomFanSupported(),
+            )
+        ) {
+            fanController.setMode(FanController.SMART)
+        }
         GovernorController.OPTIONS.firstOrNull { it.label == "Balanced" }
             ?.let { governorController.setGovernor(policies, it) }
         overlayProfileLabel = "AutoTDP"

@@ -36,6 +36,14 @@ object FanArbiter {
     fun desiredMode(boundFanMode: Int?, managedFanMode: Int?): Int? =
         boundFanMode ?: managedFanMode
 
+    /** Whether AutoTDP should run the Custom loop instead of forcing the safe vendor Smart mode. */
+    fun usesCustomFanDuringAutoTdp(
+        boundFanMode: Int?,
+        managedFanMode: Int?,
+        customFanSupported: Boolean,
+    ): Boolean =
+        desiredMode(boundFanMode, managedFanMode) == FanController.CUSTOM && customFanSupported
+
     /**
      * @param autoTdpActive an AutoTDP session owns the clocks (and set vendor Smart at session start);
      *   the fan only cascades the user's Custom loop, never other managed modes.
@@ -56,17 +64,17 @@ object FanArbiter {
         releaseMode: Int,
         readLiveMode: () -> Int?,
     ): FanAction {
-        val desired = desiredMode(boundFanMode, managedFanMode)
         // AutoTDP owns the fan: cascade the user's Custom loop if chosen + supported, else stand down
         // (startAutoTdp already forced vendor Smart for non-Custom).
         if (autoTdpActive) {
-            return if (desired == FanController.CUSTOM && customFanSupported) {
+            return if (usesCustomFanDuringAutoTdp(boundFanMode, managedFanMode, customFanSupported)) {
                 FanAction.RunCustomLoop
             } else {
                 FanAction.None
             }
         }
         // The fan PULSE wants: a foreground app's per-app fan takes priority, else the global Fan-card mode.
+        val desired = desiredMode(boundFanMode, managedFanMode)
         if (desired == null) {
             // Unmanaged. On the release EDGE (not latched), normalize the fan to [releaseMode] if it was left
             // somewhere else (a managed vendor mode, or Custom's manual passthrough). Once latched, PULSE is
