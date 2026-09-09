@@ -65,6 +65,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.kei.pulse.model.AppColorSource
 import com.kei.pulse.model.OverlayElement
+import com.kei.pulse.model.OverlayLocation
 import com.kei.pulse.model.OverlayPreset
 import com.kei.pulse.model.PulseThemeId
 import com.kei.pulse.model.RgbMode
@@ -114,10 +115,12 @@ fun SettingsScreen(
     onPerAppSwitchNoticesChange: (Boolean) -> Unit = {},
     overlayEnabled: Boolean = false,
     overlayPreset: OverlayPreset = OverlayPreset.COMPACT,
+    overlayLocation: OverlayLocation = OverlayLocation.TOP_FULL_WIDTH,
     overlayElements: Set<OverlayElement> = OverlayPreset.COMPACT.elements,
     overlayOpacity: Int = 90,
     onOverlayEnabledChange: (Boolean) -> Unit = {},
     onOverlayPresetChange: (OverlayPreset) -> Unit = {},
+    onOverlayLocationChange: (OverlayLocation) -> Unit = {},
     onOverlayElementToggle: (OverlayElement, Boolean) -> Unit = { _, _ -> },
     onOverlayOpacityChange: (Int) -> Unit = {},
     onQuickAccessChange: (Boolean) -> Unit = {},
@@ -477,6 +480,24 @@ fun SettingsScreen(
                     }
                 }
             }
+            if (overlayPreset == OverlayPreset.COMPACT) {
+                SettingsControlGroup(label = "Location") {
+                    Text(
+                        text = "Where the Compact bar sits. The centred options stack each item on its own line.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OverlayLocation.entries.forEach { location ->
+                            FilterChip(
+                                selected = overlayLocation == location,
+                                onClick = { onOverlayLocationChange(location) },
+                                label = { Text(location.label) },
+                            )
+                        }
+                    }
+                }
+            }
             SettingsControlGroup(label = "Shown items") {
                 Text(
                     text = "Tap to add or remove. Grouped by what it measures; a few items only render in the " +
@@ -776,28 +797,33 @@ private fun TileBehaviorSelector(
     selected: TileInteractionBehavior,
     onChange: (TileInteractionBehavior) -> Unit,
 ) {
-    Row(
+    Column(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         TileBehaviorOption(
             title = "Quick settings dialog",
             selected = selected == TileInteractionBehavior.SHOW_DIALOG,
             onClick = { onChange(TileInteractionBehavior.SHOW_DIALOG) },
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.fillMaxWidth(),
         )
         TileBehaviorOption(
             title = "Cycle profiles",
             selected = selected == TileInteractionBehavior.CYCLE_PROFILES,
             onClick = { onChange(TileInteractionBehavior.CYCLE_PROFILES) },
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.fillMaxWidth(),
         )
         TileBehaviorOption(
             title = "Open app",
             selected = selected == TileInteractionBehavior.OPEN_APP,
             onClick = { onChange(TileInteractionBehavior.OPEN_APP) },
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        TileBehaviorOption(
+            title = "Toggle On-Screen Overlay",
+            selected = selected == TileInteractionBehavior.TOGGLE_OVERLAY,
+            onClick = { onChange(TileInteractionBehavior.TOGGLE_OVERLAY) },
+            modifier = Modifier.fillMaxWidth(),
         )
     }
 }

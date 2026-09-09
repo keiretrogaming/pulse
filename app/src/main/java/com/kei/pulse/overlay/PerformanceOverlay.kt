@@ -10,6 +10,7 @@ import android.view.Gravity
 import android.view.WindowManager
 import androidx.core.content.getSystemService
 import com.kei.pulse.model.AppSettings
+import com.kei.pulse.model.OverlayLocation
 import com.kei.pulse.model.OverlayPreset
 import com.kei.pulse.ui.theme.PulseTheme
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -168,17 +169,14 @@ class PerformanceOverlay(private val context: Context) {
     ).also { applyGeometry(it, config) }
 
     /**
-     * Docked Compact = a full-width strip pinned to the very top of the screen (a system-bar style HUD).
+     * Docked Compact = a strip anchored to one screen edge per [OverlayConfig.location] (full-width top/bottom,
+     * or a wrap-content vertically-centred column on the left/right).
      * Detailed/Full = a wrap-content floating panel at the saved [floatX]/[floatY], clamped on-screen.
      */
     private fun applyGeometry(lp: WindowManager.LayoutParams, config: OverlayConfig) {
         lp.flags = flagsFor(config.locked)
         if (isDocked(config)) {
-            lp.width = WindowManager.LayoutParams.MATCH_PARENT
-            lp.height = WindowManager.LayoutParams.WRAP_CONTENT
-            lp.gravity = Gravity.TOP
-            lp.x = 0
-            lp.y = 0
+            applyDockedGeometry(lp, config.location)
         } else {
             lp.width = WindowManager.LayoutParams.WRAP_CONTENT
             lp.height = WindowManager.LayoutParams.WRAP_CONTENT
@@ -186,6 +184,30 @@ class PerformanceOverlay(private val context: Context) {
             val bounds = windowManager?.maximumWindowMetrics?.bounds
             lp.x = if (bounds != null) floatX.coerceIn(0, (bounds.width() - 1).coerceAtLeast(0)) else floatX.coerceAtLeast(0)
             lp.y = if (bounds != null) floatY.coerceIn(0, (bounds.height() - 1).coerceAtLeast(0)) else floatY.coerceAtLeast(0)
+        }
+    }
+
+    private fun applyDockedGeometry(lp: WindowManager.LayoutParams, location: OverlayLocation) {
+        lp.x = 0
+        lp.y = 0
+        lp.height = WindowManager.LayoutParams.WRAP_CONTENT
+        when (location) {
+            OverlayLocation.TOP_FULL_WIDTH -> {
+                lp.width = WindowManager.LayoutParams.MATCH_PARENT
+                lp.gravity = Gravity.TOP
+            }
+            OverlayLocation.BOTTOM_FULL_WIDTH -> {
+                lp.width = WindowManager.LayoutParams.MATCH_PARENT
+                lp.gravity = Gravity.BOTTOM
+            }
+            OverlayLocation.LEFT_CENTER_VERTICAL -> {
+                lp.width = WindowManager.LayoutParams.WRAP_CONTENT
+                lp.gravity = Gravity.CENTER_VERTICAL or Gravity.START
+            }
+            OverlayLocation.RIGHT_CENTER_VERTICAL -> {
+                lp.width = WindowManager.LayoutParams.WRAP_CONTENT
+                lp.gravity = Gravity.CENTER_VERTICAL or Gravity.END
+            }
         }
     }
 

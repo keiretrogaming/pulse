@@ -584,7 +584,7 @@ class ForegroundAppMonitorService : Service() {
                 overlayLocked = !overlayLocked
                 val settings = container.settingsStorage.settings.first()
                 overlay.setConfig(
-                    OverlayConfig(settings.overlayPreset, settings.overlayOpacity, overlayLocked, settings.overlayElements),
+                    OverlayConfig(settings.overlayPreset, settings.overlayOpacity, overlayLocked, settings.overlayElements, settings.overlayLocation),
                 )
                 updateNotification(
                     if (overlayLocked) "Overlay locked" else "Overlay unlocked — drag to reposition",
@@ -1220,7 +1220,7 @@ class ForegroundAppMonitorService : Service() {
         overlayProfileLabel = resolveProfileLabel(settings)
         overlay.show(
             settings = settings,
-            config = OverlayConfig(settings.overlayPreset, settings.overlayOpacity, overlayLocked, settings.overlayElements),
+            config = OverlayConfig(settings.overlayPreset, settings.overlayOpacity, overlayLocked, settings.overlayElements, settings.overlayLocation),
             onMoved = { x, y -> serviceScope.launch { container.settingsStorage.persistOverlayPosition(x, y) } },
             onPresetCycled = { preset -> serviceScope.launch { container.settingsStorage.persistOverlayPreset(preset) } },
             // Keep the service's lock state synced with the in-overlay 🔒 button so a later config push

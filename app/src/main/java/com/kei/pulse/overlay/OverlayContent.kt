@@ -112,9 +112,10 @@ private fun FloatingPanel(
 }
 
 /**
- * Compact, docked: a full-width status bar pinned to the top of the screen (its window is MATCH_PARENT and
- * not draggable). Metrics are distributed edge-to-edge with [Arrangement.SpaceBetween], so the bar spans the
- * width and never resizes as the numbers change — no jitter, and a wide value (LEFT) can't wrap.
+ * Compact, docked: a status strip anchored to one screen edge (its window handles the anchoring; not
+ * draggable). Full-width top/bottom lay the metrics edge-to-edge with [Arrangement.SpaceBetween] so the bar
+ * spans the width and never resizes as the numbers change; the centred-vertical variants stack each metric on
+ * its own line in a wrap-content column. The divider line is drawn on the screen-facing edge.
  */
 @Composable
 private fun DockedBar(
@@ -125,58 +126,91 @@ private fun DockedBar(
     onCyclePreset: () -> Unit,
     onToggleLock: () -> Unit,
 ) {
-    val t = stats.telemetry
-    val els = config.elements
+    val vertical = config.location.stacksVertically
+    val dividers = dividerEdgesFor(config.location)
+    val line = accent.copy(alpha = 0.55f)
     Box(
         modifier = Modifier
-            .fillMaxWidth()
+            .then(if (vertical) Modifier else Modifier.fillMaxWidth())
             .alpha(opacity)
             .background(Color.Black.copy(alpha = 0.66f))
-            .drawBehind {
-                val y = size.height - 1f
-                drawLine(
-                    color = accent.copy(alpha = 0.55f),
-                    start = Offset(0f, y),
-                    end = Offset(size.width, y),
-                    strokeWidth = 2f,
-                )
-            }
+            .drawBehind { dividers.forEach { drawDivider(it, line) } }
             .padding(horizontal = 16.dp, vertical = 6.dp),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            if (OverlayElement.FPS in els) Inline("FPS", fpsText(stats.fps?.fps), accent)
-            if (OverlayElement.GPU_LOAD in els) Inline("GPU", pct(t.gpuLoadPercent), loadColor(t.gpuLoadPercent))
-            if (OverlayElement.GPU_TEMP in els) Inline("°G", num(t.gpuTempC), tempColor(t.gpuTempC))
-            if (OverlayElement.CPU_LOAD in els) Inline("CPU", pct(t.cpuLoadPercent), loadColor(t.cpuLoadPercent))
-            if (OverlayElement.CPU_TEMP in els) Inline("°C", num(t.cpuTempC), tempColor(t.cpuTempC))
-            if (OverlayElement.POWER in els) Inline("W", powerValue(stats), MaterialTheme.colorScheme.onSurface)
-            if (OverlayElement.BATTERY_LEFT in els) {
-                Inline(if (t.isDischarging) "LEFT" else "FULL", leftText(stats.minutesLeft), MaterialTheme.colorScheme.onSurface)
+        if (vertical) {
+            val alignRight = config.location == com.kei.pulse.model.OverlayLocation.RIGHT_CENTER_VERTICAL
+            Column(
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+                horizontalAlignment = if (alignRight) Alignment.End else Alignment.Start,
+            ) {
+                DockedMetrics(stats, config, accent)
+                if (!config.locked) DockedControls(accent, onCyclePreset, onToggleLock)
             }
-            if (isThrottling(t)) ThrottlePill()
-            if (!config.locked) {
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(
-                        "⤢ LAYOUT",
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = accent,
-                        modifier = Modifier.clickable { onCyclePreset() },
-                    )
-                    Text(
-                        "🔒 LOCK",
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = accent,
-                        modifier = Modifier.clickable { onToggleLock() },
-                    )
-                }
+        } else {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                DockedMetrics(stats, config, accent)
+                if (!config.locked) DockedControls(accent, onCyclePreset, onToggleLock)
             }
         }
+    }
+}
+
+private enum class DividerEdge { TOP, BOTTOM, LEFT, RIGHT }
+
+private fun dividerEdgesFor(location: com.kei.pulse.model.OverlayLocation): List<DividerEdge> = when (location) {
+    com.kei.pulse.model.OverlayLocation.TOP_FULL_WIDTH -> listOf(DividerEdge.BOTTOM)
+    com.kei.pulse.model.OverlayLocation.BOTTOM_FULL_WIDTH -> listOf(DividerEdge.TOP)
+    com.kei.pulse.model.OverlayLocation.LEFT_CENTER_VERTICAL -> listOf(DividerEdge.RIGHT, DividerEdge.TOP, DividerEdge.BOTTOM)
+    com.kei.pulse.model.OverlayLocation.RIGHT_CENTER_VERTICAL -> listOf(DividerEdge.LEFT, DividerEdge.TOP, DividerEdge.BOTTOM)
+}
+
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawDivider(edge: DividerEdge, color: Color) {
+    val (start, end) = when (edge) {
+        DividerEdge.TOP -> Offset(0f, 1f) to Offset(size.width, 1f)
+        DividerEdge.BOTTOM -> Offset(0f, size.height - 1f) to Offset(size.width, size.height - 1f)
+        DividerEdge.LEFT -> Offset(1f, 0f) to Offset(1f, size.height)
+        DividerEdge.RIGHT -> Offset(size.width - 1f, 0f) to Offset(size.width - 1f, size.height)
+    }
+    drawLine(color = color, start = start, end = end, strokeWidth = 2f)
+}
+
+@Composable
+private fun DockedMetrics(stats: OverlayStats, config: OverlayConfig, accent: Color) {
+    val t = stats.telemetry
+    val els = config.elements
+    if (OverlayElement.FPS in els) Inline("FPS", fpsText(stats.fps?.fps), accent)
+    if (OverlayElement.GPU_LOAD in els) Inline("GPU", pct(t.gpuLoadPercent), loadColor(t.gpuLoadPercent))
+    if (OverlayElement.GPU_TEMP in els) Inline("°G", num(t.gpuTempC), tempColor(t.gpuTempC))
+    if (OverlayElement.CPU_LOAD in els) Inline("CPU", pct(t.cpuLoadPercent), loadColor(t.cpuLoadPercent))
+    if (OverlayElement.CPU_TEMP in els) Inline("°C", num(t.cpuTempC), tempColor(t.cpuTempC))
+    if (OverlayElement.POWER in els) Inline("W", powerValue(stats), MaterialTheme.colorScheme.onSurface)
+    if (OverlayElement.BATTERY_LEFT in els) {
+        Inline(if (t.isDischarging) "LEFT" else "FULL", leftText(stats.minutesLeft), MaterialTheme.colorScheme.onSurface)
+    }
+    if (isThrottling(t)) ThrottlePill()
+}
+
+@Composable
+private fun DockedControls(accent: Color, onCyclePreset: () -> Unit, onToggleLock: () -> Unit) {
+    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text(
+            "⤢ LAYOUT",
+            fontSize = 9.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = accent,
+            modifier = Modifier.clickable { onCyclePreset() },
+        )
+        Text(
+            "🔒 LOCK",
+            fontSize = 9.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = accent,
+            modifier = Modifier.clickable { onToggleLock() },
+        )
     }
 }
 

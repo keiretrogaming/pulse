@@ -195,10 +195,12 @@ class MainActivity : ComponentActivity() {
                             onPerAppSwitchNoticesChange = viewModel::setPerAppSwitchNotices,
                             overlayEnabled = settings.overlayEnabled,
                             overlayPreset = settings.overlayPreset,
+                            overlayLocation = settings.overlayLocation,
                             overlayElements = settings.overlayElements,
                             overlayOpacity = settings.overlayOpacity,
                             onOverlayEnabledChange = ::setOverlayEnabled,
                             onOverlayPresetChange = viewModel::setOverlayPreset,
+                            onOverlayLocationChange = viewModel::setOverlayLocation,
                             onOverlayElementToggle = viewModel::setOverlayElement,
                             onOverlayOpacityChange = viewModel::setOverlayOpacity,
                             onQuickAccessChange = ::setQuickAccessEnabled,
@@ -398,6 +400,7 @@ class MainActivity : ComponentActivity() {
     private fun setOverlayEnabled(enabled: Boolean) {
         if (!enabled) {
             viewModel.setOverlayEnabled(false)
+            QuickSettingsTileRefresher.requestUpdate(this)
             return
         }
         if (!PerformanceOverlay.hasPermission(this)) {
@@ -510,6 +513,7 @@ class MainActivity : ComponentActivity() {
     private fun enableOverlay() {
         viewModel.setOverlayEnabled(true)
         ForegroundAppMonitorService.start(this)
+        QuickSettingsTileRefresher.requestUpdate(this)
     }
 
     /**
