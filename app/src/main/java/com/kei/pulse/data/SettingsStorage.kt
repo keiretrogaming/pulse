@@ -13,6 +13,7 @@ import com.kei.pulse.model.CustomTuning
 import com.kei.pulse.model.FanCurve
 import com.kei.pulse.model.FanTempController
 import com.kei.pulse.model.OverlayElement
+import com.kei.pulse.model.OverlayLocation
 import com.kei.pulse.model.OverlayPreset
 import com.kei.pulse.model.AutoTdpBias
 import com.kei.pulse.model.RgbMode
@@ -71,6 +72,7 @@ class SettingsStorage(private val context: Context) {
     private val quickAccessComboKey = stringPreferencesKey("quick_access_combo")
     private val quickAccessPerGameScopeKey = booleanPreferencesKey("quick_access_per_game_scope")
     private val overlayPresetKey = stringPreferencesKey("overlay_preset")
+    private val overlayLocationKey = stringPreferencesKey("overlay_location")
     private val overlayElementsKey = stringPreferencesKey("overlay_elements")
     private val overlayOpacityKey = intPreferencesKey("overlay_opacity")
     private val overlayPosXKey = intPreferencesKey("overlay_pos_x")
@@ -137,6 +139,7 @@ class SettingsStorage(private val context: Context) {
             // Existing users (no element key yet) inherit their saved preset's bundle — no migration logic needed.
             overlayElements = preferences[overlayElementsKey]?.let(::parseOverlayElements)
                 ?: (preferences[overlayPresetKey]?.let(::parseOverlayPreset) ?: OverlayPreset.COMPACT).elements,
+            overlayLocation = preferences[overlayLocationKey]?.let(::parseOverlayLocation) ?: OverlayLocation.TOP_FULL_WIDTH,
             overlayOpacity = preferences[overlayOpacityKey] ?: 90,
             overlayPosX = preferences[overlayPosXKey] ?: 24,
             overlayPosY = preferences[overlayPosYKey] ?: 48,
@@ -210,6 +213,10 @@ class SettingsStorage(private val context: Context) {
 
     suspend fun persistOverlayPreset(preset: OverlayPreset) {
         context.settingsDataStore.edit { preferences -> preferences[overlayPresetKey] = preset.name }
+    }
+
+    suspend fun persistOverlayLocation(location: OverlayLocation) {
+        context.settingsDataStore.edit { preferences -> preferences[overlayLocationKey] = location.name }
     }
 
     /** Persist the chosen overlay items as a comma-joined name list (empty string = nothing shown). */
@@ -511,6 +518,9 @@ class SettingsStorage(private val context: Context) {
 
     private fun parseOverlayPreset(raw: String): OverlayPreset =
         runCatching { OverlayPreset.valueOf(raw) }.getOrDefault(OverlayPreset.COMPACT)
+
+    private fun parseOverlayLocation(raw: String): OverlayLocation =
+        runCatching { OverlayLocation.valueOf(raw) }.getOrDefault(OverlayLocation.TOP_FULL_WIDTH)
 
     /** Comma-joined names → element set, skipping any name a newer build renamed/removed (never throws). */
     private fun parseOverlayElements(raw: String): Set<OverlayElement> =

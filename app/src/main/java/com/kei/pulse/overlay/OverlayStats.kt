@@ -121,4 +121,5 @@ data class OverlayConfig(
     val opacityPercent: Int = 90,
     val locked: Boolean = true,
     val elements: Set<com.kei.pulse.model.OverlayElement> = com.kei.pulse.model.OverlayPreset.COMPACT.elements,
+    val location: com.kei.pulse.model.OverlayLocation = com.kei.pulse.model.OverlayLocation.TOP_FULL_WIDTH,
 )

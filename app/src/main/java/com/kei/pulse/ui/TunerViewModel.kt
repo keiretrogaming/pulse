@@ -1224,6 +1224,10 @@ class TunerViewModel(
         }
     }
 
+    fun setOverlayLocation(location: com.kei.pulse.model.OverlayLocation) {
+        viewModelScope.launch { settingsStorage.persistOverlayLocation(location) }
+    }
+
     fun setOverlayElement(element: com.kei.pulse.model.OverlayElement, on: Boolean) {
         viewModelScope.launch {
             val current = settingsStorage.settings.first().overlayElements

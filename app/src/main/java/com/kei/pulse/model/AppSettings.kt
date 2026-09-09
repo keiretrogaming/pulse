@@ -73,6 +73,18 @@ enum class OverlayPreset(val label: String, val elements: Set<OverlayElement>) {
 }
 
 /**
+ * Where the Compact (docked) overlay bar sits and how it lays its items out. The full-width variants keep the
+ * horizontal edge-to-edge bar (divider drawn on the screen-facing edge); the centred variants stack each item
+ * on its own line and pin a wrap-content strip to one screen side, vertically centred.
+ */
+enum class OverlayLocation(val label: String, val stacksVertically: Boolean) {
+    TOP_FULL_WIDTH("Full width · top", false),
+    BOTTOM_FULL_WIDTH("Full width · bottom", false),
+    RIGHT_CENTER_VERTICAL("Centred vertically · right", true),
+    LEFT_CENTER_VERTICAL("Centred vertically · left", true),
+}
+
+/**
  * RGB joystick-LED mode (AYN / Retroid handhelds that expose the vendor joystick-LED keys). OFF leaves the LED
  * to the system; BATTERY/HEAT are automatic "info LED" mappings (green→red as battery drains; blue→red as it
  * heats); MANUAL is full per-stick control — color, saturation and brightness, per [RgbStick].
@@ -151,6 +163,8 @@ data class AppSettings(
      */
     val quickAccessPerGameScope: Boolean = true,
     val overlayPreset: OverlayPreset = OverlayPreset.COMPACT,
+    /** Where the docked (Compact) overlay bar anchors and whether it stacks its items vertically. */
+    val overlayLocation: OverlayLocation = OverlayLocation.TOP_FULL_WIDTH,
     val overlayOpacity: Int = 90,
     val overlayPosX: Int = 24,
     val overlayPosY: Int = 48,

@@ -65,6 +65,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.kei.pulse.model.AppColorSource
 import com.kei.pulse.model.OverlayElement
+import com.kei.pulse.model.OverlayLocation
 import com.kei.pulse.model.OverlayPreset
 import com.kei.pulse.model.PulseThemeId
 import com.kei.pulse.model.RgbMode
@@ -114,10 +115,12 @@ fun SettingsScreen(
     onPerAppSwitchNoticesChange: (Boolean) -> Unit = {},
     overlayEnabled: Boolean = false,
     overlayPreset: OverlayPreset = OverlayPreset.COMPACT,
+    overlayLocation: OverlayLocation = OverlayLocation.TOP_FULL_WIDTH,
     overlayElements: Set<OverlayElement> = OverlayPreset.COMPACT.elements,
     overlayOpacity: Int = 90,
     onOverlayEnabledChange: (Boolean) -> Unit = {},
     onOverlayPresetChange: (OverlayPreset) -> Unit = {},
+    onOverlayLocationChange: (OverlayLocation) -> Unit = {},
     onOverlayElementToggle: (OverlayElement, Boolean) -> Unit = { _, _ -> },
     onOverlayOpacityChange: (Int) -> Unit = {},
     onQuickAccessChange: (Boolean) -> Unit = {},
@@ -474,6 +477,24 @@ fun SettingsScreen(
                             onClick = { onOverlayPresetChange(preset) },
                             label = { Text(preset.label) },
                         )
+                    }
+                }
+            }
+            if (overlayPreset == OverlayPreset.COMPACT) {
+                SettingsControlGroup(label = "Location") {
+                    Text(
+                        text = "Where the Compact bar sits. The centred options stack each item on its own line.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OverlayLocation.entries.forEach { location ->
+                            FilterChip(
+                                selected = overlayLocation == location,
+                                onClick = { onOverlayLocationChange(location) },
+                                label = { Text(location.label) },
+                            )
+                        }
                     }
                 }
             }
