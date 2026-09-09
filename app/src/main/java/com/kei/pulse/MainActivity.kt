@@ -398,6 +398,7 @@ class MainActivity : ComponentActivity() {
     private fun setOverlayEnabled(enabled: Boolean) {
         if (!enabled) {
             viewModel.setOverlayEnabled(false)
+            QuickSettingsTileRefresher.requestUpdate(this)
             return
         }
         if (!PerformanceOverlay.hasPermission(this)) {
@@ -510,6 +511,7 @@ class MainActivity : ComponentActivity() {
     private fun enableOverlay() {
         viewModel.setOverlayEnabled(true)
         ForegroundAppMonitorService.start(this)
+        QuickSettingsTileRefresher.requestUpdate(this)
     }
 
     /**

@@ -776,28 +776,33 @@ private fun TileBehaviorSelector(
     selected: TileInteractionBehavior,
     onChange: (TileInteractionBehavior) -> Unit,
 ) {
-    Row(
+    Column(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         TileBehaviorOption(
             title = "Quick settings dialog",
             selected = selected == TileInteractionBehavior.SHOW_DIALOG,
             onClick = { onChange(TileInteractionBehavior.SHOW_DIALOG) },
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.fillMaxWidth(),
         )
         TileBehaviorOption(
             title = "Cycle profiles",
             selected = selected == TileInteractionBehavior.CYCLE_PROFILES,
             onClick = { onChange(TileInteractionBehavior.CYCLE_PROFILES) },
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.fillMaxWidth(),
         )
         TileBehaviorOption(
             title = "Open app",
             selected = selected == TileInteractionBehavior.OPEN_APP,
             onClick = { onChange(TileInteractionBehavior.OPEN_APP) },
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        TileBehaviorOption(
+            title = "Toggle On-Screen Overlay",
+            selected = selected == TileInteractionBehavior.TOGGLE_OVERLAY,
+            onClick = { onChange(TileInteractionBehavior.TOGGLE_OVERLAY) },
+            modifier = Modifier.fillMaxWidth(),
         )
     }
 }

@@ -7,4 +7,6 @@
     <string name="tile_title">PULSE</string>
     <string name="tile_state_manual">Manual</string>
     <string name="tile_state_unavailable">Unavailable</string>
+    <string name="tile_overlay_on">Overlay on</string>
+    <string name="tile_overlay_off">Overlay off</string>
 </resources>

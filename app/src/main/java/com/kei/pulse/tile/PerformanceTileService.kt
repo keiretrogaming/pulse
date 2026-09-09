@@ -80,7 +80,7 @@ class PerformanceTileService : TileService() {
                 val state = container.repository.observeState().first()
                 val settings = container.settingsStorage.settings.first()
                 val presentation = buildTilePresentation(state, settings)
-                val visualState = buildTileVisualState(state)
+                val visualState = buildTileVisualState(state, settings)
                 withContext(Dispatchers.Main) {
                     qsTile?.apply {
                         label = presentation.label
@@ -109,6 +109,15 @@ class PerformanceTileService : TileService() {
     )
 
     private fun buildTilePresentation(state: TunerState, settings: AppSettings): TilePresentation {
+        if (settings.tileTapBehavior == TileInteractionBehavior.TOGGLE_OVERLAY) {
+            // The OSD overlay is independent of PServer, so this mode stays usable on incompatible devices.
+            return TilePresentation(
+                label = getString(R.string.tile_title),
+                subtitle = getString(
+                    if (settings.overlayEnabled) R.string.tile_overlay_on else R.string.tile_overlay_off,
+                ),
+            )
+        }
         if (!state.isPServerAvailable) {
             return TilePresentation(
                 label = getString(R.string.tile_title),
@@ -131,7 +140,10 @@ class PerformanceTileService : TileService() {
         }
     }
 
-    private fun buildTileVisualState(state: TunerState): Int {
+    private fun buildTileVisualState(state: TunerState, settings: AppSettings): Int {
+        if (settings.tileTapBehavior == TileInteractionBehavior.TOGGLE_OVERLAY) {
+            return if (settings.overlayEnabled) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
+        }
         if (!state.isPServerAvailable) return Tile.STATE_INACTIVE
         val activeProfileId = effectiveTileProfileId(state)
         val activeName = effectiveTileProfileName(state)
@@ -185,6 +197,8 @@ class PerformanceTileService : TileService() {
                     TileInteractionBehavior.OPEN_APP ->
                         withContext(Dispatchers.Main) { launchAppAndCollapse() }
                     TileInteractionBehavior.CYCLE_PROFILES -> cycleTierAndUpdate(container)
+                    TileInteractionBehavior.TOGGLE_OVERLAY ->
+                        withContext(Dispatchers.Main) { launchOverlayToggleAndCollapse() }
                 }
             }.onFailure { throwable ->
                 Log.e(TAG, "Failed to handle tile tap", throwable)
@@ -243,6 +257,11 @@ class PerformanceTileService : TileService() {
     private fun launchDialogAndCollapse() {
         val intent = TileControlActivity.createDialogIntent(applicationContext)
         launchIntentAndCollapse(intent)
+    }
+
+    @Suppress("DEPRECATION")
+    private fun launchOverlayToggleAndCollapse() {
+        launchIntentAndCollapse(TileControlActivity.createToggleOverlayIntent(applicationContext))
     }
 
     @Suppress("DEPRECATION")

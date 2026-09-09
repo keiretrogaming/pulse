@@ -18,6 +18,7 @@ enum class TileInteractionBehavior {
     SHOW_DIALOG,
     CYCLE_PROFILES,
     OPEN_APP,
+    TOGGLE_OVERLAY,
 }
 
 /**
