@@ -6,6 +6,8 @@
 
 *A no-root performance tuner for handheld gaming devices — give your handheld a brain.*
 
+**English** | [台灣繁體中文](README.zh-TW.md)
+
 ![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/keiretrogaming/pulse/total)
 ![GitHub Release](https://img.shields.io/github/v/release/keiretrogaming/pulse)
 ![Android](https://img.shields.io/badge/Android-12%2B-3DDC84?logo=android&logoColor=white)
