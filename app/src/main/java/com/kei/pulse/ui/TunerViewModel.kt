@@ -18,6 +18,7 @@ import com.kei.pulse.model.FanCurve
 import com.kei.pulse.model.FanCalibration
 import com.kei.pulse.model.FanCalibrationSample
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 import com.kei.pulse.data.PerAppConfigStorage
 import com.kei.pulse.data.PerformanceRepository
 import com.kei.pulse.data.PowerEstimator
@@ -1022,6 +1023,8 @@ class TunerViewModel(
 
         viewModelScope.launch {
             val appliedProfile = ProfileStateResolver.preferredProfileForCurrentValues(state)
+            val appliedValues = state.currentValues.filterKeys { id -> state.policies.any { it.id == id } }
+            val editsSnapshot = edits.value
             val applyResult = repository.applyValues(
                 policies = state.policies,
                 selectedValues = state.currentValues,
@@ -1031,13 +1034,20 @@ class TunerViewModel(
                 persistAsCustom = appliedProfile == null,
             )
             applyResult.onSuccess { outcome ->
-                edits.value = emptyMap()
                 transientMessage.value = if (outcome.verificationPassed) {
                     buildAppliedMessage(appliedProfile, outcome.commandOutput)
                 } else {
                     buildVerificationFailureMessage(state, outcome.actualValues, outcome.commandOutput)
                 }
                 transientError.value = null
+                withTimeoutOrNull(400) {
+                    repository.observeState().first { repo ->
+                        appliedValues.all { (policyId, value) -> repo.currentValues[policyId] == value }
+                    }
+                }
+                if (edits.value == editsSnapshot) {
+                    edits.value = emptyMap()
+                }
             }.onFailure { throwable ->
                 transientError.value = throwable.message ?: "Failed to apply limits"
             }
