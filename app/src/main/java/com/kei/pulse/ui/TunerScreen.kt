@@ -64,6 +64,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.LocalContext
@@ -721,25 +722,24 @@ private fun ProfileListSection(
                 applyButtonBringIntoViewRequester.bringIntoView()
             }
         }
-        if (!isSelectedAlreadyApplied) {
-            Spacer(Modifier.size(4.dp))
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .bringIntoViewRequester(applyButtonBringIntoViewRequester)
-                    .padding(bottom = 4.dp),
-                horizontalArrangement = Arrangement.End,
+        Spacer(Modifier.size(4.dp))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .bringIntoViewRequester(applyButtonBringIntoViewRequester)
+                .padding(bottom = 4.dp)
+                .alpha(if (isSelectedAlreadyApplied) 0f else 1f),
+            horizontalArrangement = Arrangement.End,
+        ) {
+            Button(
+                onClick = { if (!isSelectedAlreadyApplied) onApplySelectedProfile() },
+                enabled = canApplySelectedProfile,
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
             ) {
-                Button(
-                    onClick = onApplySelectedProfile,
-                    enabled = canApplySelectedProfile,
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-                ) {
-                    Text(
-                        text = state.selectedDisplayProfileName?.let { "Apply $it" }
-                            ?: "Select a profile to apply",
-                    )
-                }
+                Text(
+                    text = state.selectedDisplayProfileName?.let { "Apply $it" }
+                        ?: "Select a profile to apply",
+                )
             }
         }
     }
