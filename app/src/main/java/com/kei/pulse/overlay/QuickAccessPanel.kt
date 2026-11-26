@@ -58,6 +58,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kei.pulse.data.FanController
+import com.kei.pulse.i18n.LocalPulseStrings
+import com.kei.pulse.i18n.PulseStrings
 import com.kei.pulse.model.AppSettings
 import com.kei.pulse.model.AutoTdpBias
 import com.kei.pulse.model.OverlayPreset
@@ -118,7 +120,7 @@ private fun QuickAccessHandle(onExpand: () -> Unit) {
             .clickable { onExpand() },
         contentAlignment = Alignment.Center,
     ) {
-        Icon(Icons.Rounded.ChevronLeft, contentDescription = "Open Quick Access bar", tint = cs.onPrimary, modifier = Modifier.size(18.dp))
+        Icon(Icons.Rounded.ChevronLeft, contentDescription = null, tint = cs.onPrimary, modifier = Modifier.size(18.dp))
     }
 }
 
@@ -132,6 +134,7 @@ private fun QuickAccessPanel(
     onAction: (QuickAccessAction) -> Unit,
 ) {
     val accent = MaterialTheme.colorScheme.primary
+    val strings = LocalPulseStrings.current
     val tabs = QuickAccessTab.entries
     var tabIndex by remember { mutableIntStateOf(0) }
     var cursor by remember { mutableIntStateOf(0) }
@@ -155,17 +158,17 @@ private fun QuickAccessPanel(
     // real incident; the flash makes each one visible). Sliders + scope flash their own way (null label).
     val dispatch: (QuickAccessAction) -> Unit = { a ->
         onAction(a)
-        flashLabel(a)?.let(showFlash)
+        flashLabel(a, strings)?.let(showFlash)
     }
     // The live control list for the active tab. Rebuilt each recomposition off the current settings/perApp, so
     // selections + visibility (e.g. AutoTDP sub-controls) are always current.
     val items: List<NavItem> = when (tab) {
         QuickAccessTab.PERFORMANCE ->
-            performanceItems(stats, settings, perApp, sliderLocal, pendingScope, { pendingScope = it }, showFlash, dispatch)
-        QuickAccessTab.FAN -> fanItems(settings, dispatch)
-        QuickAccessTab.RGB -> lightingItems(settings, dispatch)
-        QuickAccessTab.OVERLAY -> overlayItems(settings, dispatch)
-        QuickAccessTab.SYSTEM -> systemItems(stats, sliderLocal, dispatch)
+            performanceItems(stats, settings, perApp, sliderLocal, pendingScope, { pendingScope = it }, showFlash, dispatch, strings)
+        QuickAccessTab.FAN -> fanItems(settings, dispatch, strings)
+        QuickAccessTab.RGB -> lightingItems(settings, dispatch, strings)
+        QuickAccessTab.OVERLAY -> overlayItems(settings, dispatch, strings)
+        QuickAccessTab.SYSTEM -> systemItems(stats, sliderLocal, dispatch, strings)
     }
     // The intent collector is long-lived; rememberUpdatedState so it always sees the CURRENT list/tab (the
     // pointerInput/collector-captures-once gotcha).
@@ -239,7 +242,7 @@ private fun QuickAccessPanel(
                     Spacer(Modifier.weight(1f))
                     stats.telemetry.batteryPercent?.let { Text("$it%", color = QaColors.Muted, fontSize = 12.sp) }
                 }
-                Text(tabTitle(tab), color = QaColors.Text, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+                Text(tabTitle(tab, strings), color = QaColors.Text, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
                 TelemetryStrip(stats)
                 Box(Modifier.fillMaxWidth().height(1.dp).background(QaColors.Outline))
                 items.forEachIndexed { i, item -> item.render(i == cursor) }
@@ -251,14 +254,14 @@ private fun QuickAccessPanel(
         ) {
             // The footer doubles as the applied-feedback line: a commit flashes its confirmation here briefly.
             Text(
-                flash ?: "↑↓ move · ←→ adjust · A select · B close",
+                flash ?: strings.qaFooterNav,
                 color = if (flash != null) accent else QaColors.Muted,
                 fontSize = 10.sp,
                 letterSpacing = 0.4.sp,
                 fontWeight = if (flash != null) FontWeight.SemiBold else FontWeight.Normal,
                 modifier = Modifier.weight(1f),
             )
-            TextButton(onClick = onClose) { Text("Close") }
+            TextButton(onClick = onClose) { Text(strings.close) }
         }
     }
 }
@@ -274,6 +277,7 @@ private fun performanceItems(
     onPendingScope: (Int?) -> Unit,
     onFlash: (String) -> Unit,
     onAction: (QuickAccessAction) -> Unit,
+    strings: PulseStrings,
 ): List<NavItem> {
     // "PROFILE: Per-Game | Global" — where the perf edits land. Per-Game reflects/edits the foreground game's
     // per-app profile; Global reflects/edits the global default. COMMITTING the switch has real semantics
@@ -305,29 +309,30 @@ private fun performanceItems(
                 onAction(QuickAccessAction.SetScope(toPerGame))
                 onFlash(
                     when {
-                        toPerGame && perApp == null -> "Per-game profile created"
-                        toPerGame -> "Editing this game's profile"
-                        perApp != null -> "Profile removed — following Global"
-                        else -> "Following Global"
+                        toPerGame && perApp == null -> strings.qaFlashCreated
+                        toPerGame -> strings.qaFlashEditing
+                        perApp != null -> strings.qaFlashRemoved
+                        else -> strings.qaFlashFollowing
                     },
                 )
             }
             onPendingScope(null)
         },
+        strings = strings,
     )
-    items += modeRadioItem("AutoTDP", "Auto-hold target FPS at min power", selectedMode == 0) {
+    items += modeRadioItem("AutoTDP", strings.qaAutoTdpDesc, selectedMode == 0) {
         if (!autoOn) onAction(QuickAccessAction.ToggleAutoTdp) // selecting AutoTDP turns it on (never off)
     }
     PowerTier.entries.forEachIndexed { i, t ->
-        items += modeRadioItem(t.label, t.tagline, selectedMode == i + 1) { onAction(QuickAccessAction.SetTier(t)) }
+        items += modeRadioItem(t.localizedLabel(strings), t.localizedTagline(strings), selectedMode == i + 1) { onAction(QuickAccessAction.SetTier(t)) }
     }
     // "Stock — don't tune": the explicit hands-off mode. Per-game = the AUTO_OFF binding (sticks even when the
     // global default is on — e.g. don't tune a benchmark); All-games = the global default off. Gives the old
     // "nothing selected" state a real identity.
     val stockSelected = if (perGame) PerAppConfig.isAutoOff(perApp?.profileBinding) else !autoOn && tier == null
     items += modeRadioItem(
-        "Stock",
-        if (perGame) "Don't tune this game — PULSE hands off" else "No tuning by default",
+        strings.powerTierStock,
+        if (perGame) strings.qaStockModeDescGame else strings.qaStockModeDescGlobal,
         stockSelected,
     ) { if (!stockSelected) onAction(QuickAccessAction.SetStockMode) }
     // Gate on the SELECTED MODE being Custom (AutoTDP outranks the tier, same precedence as the radio list) —
@@ -338,7 +343,7 @@ private fun performanceItems(
         // they define the Custom tier itself; a per-game Custom binding references the same values.
         // Power Target: 100% = uncapped. Value comes from settings (the reactive feed reflects it within ms).
         val pt = if (settings.powerTargetEnabled) settings.powerTargetPercent else 100
-        items += sliderNavItem("Power target", pt) { v ->
+        items += sliderNavItem(strings.qaPowerTargetLabel, pt) { v ->
             onAction(QuickAccessAction.SetPowerTarget(v.coerceIn(QuickAccess.POWER_TARGET_MIN, QuickAccess.POWER_TARGET_MAX)))
         }
         // GPU cap: steps through the Adreno's supported levels. The shown value is the LIVE device readback
@@ -347,7 +352,7 @@ private fun performanceItems(
         if (!levels.isNullOrEmpty()) {
             val cap = sliderLocal["gpucap"] ?: stats.gpuCapKhz ?: levels.last()
             val idx = levels.indices.minByOrNull { kotlin.math.abs(levels[it] - cap) } ?: levels.lastIndex
-            items += stepperNavItem("GPU cap", "${levels[idx] / 1000} MHz") { d ->
+            items += stepperNavItem(strings.qaGpuCapLabel, "${levels[idx] / 1000} MHz") { d ->
                 val next = levels[(idx + d).coerceIn(0, levels.lastIndex)]
                 if (next != levels[idx]) {
                     sliderLocal["gpucap"] = next
@@ -358,35 +363,35 @@ private fun performanceItems(
     }
     if (autoOn) {
         val fps = if (perGame) QuickAccessPerApp.effectiveFps(perApp, settings.autoTdpFpsTarget) else settings.autoTdpFpsTarget
-        items += chipNavItem("Frame target", FPS_OPTIONS.map { it.toString() }, FPS_OPTIONS.indexOf(fps)) { i ->
+        items += chipNavItem(strings.qaFrameTargetLabel, FPS_OPTIONS.map { if (it <= 0) strings.maxStr else it.toString() }, FPS_OPTIONS.indexOf(fps)) { i ->
             onAction(QuickAccessAction.SetFpsTarget(FPS_OPTIONS[i]))
         }
         val bias = if (perGame) QuickAccessPerApp.effectiveBias(perApp, settings.autoTdpBias) else settings.autoTdpBias
-        items += chipNavItem("Bias", AutoTdpBias.entries.map { biasLabel(it) }, AutoTdpBias.entries.indexOf(bias)) { i ->
+        items += chipNavItem(strings.qaBiasLabel, AutoTdpBias.entries.map { it.localizedLabel(strings) }, AutoTdpBias.entries.indexOf(bias)) { i ->
             onAction(QuickAccessAction.SetBias(AutoTdpBias.entries[i]))
         }
         val park = if (perGame) QuickAccessPerApp.effectiveAggressivePark(perApp, settings.autoTdpAggressivePark) else settings.autoTdpAggressivePark
-        items += toggleNavItem("Aggressive park", park) { onAction(QuickAccessAction.SetAggressivePark(!park)) }
+        items += toggleNavItem(strings.autoTdpAggressivePark, park) { onAction(QuickAccessAction.SetAggressivePark(!park)) }
     }
     return items
 }
 
-private fun fanItems(settings: AppSettings, onAction: (QuickAccessAction) -> Unit): List<NavItem> {
+private fun fanItems(settings: AppSettings, onAction: (QuickAccessAction) -> Unit, strings: PulseStrings): List<NavItem> {
     val items = mutableListOf<NavItem>()
     val modes = FanController.MODES
-    items += chipNavItem("Fan mode", modes.map { it.label }, modes.indexOfFirst { it.value == settings.managedFanMode }) { i ->
+    items += chipNavItem(strings.fanModeLabel, modes.map { fanModeLabel(it.value, strings) }, modes.indexOfFirst { it.value == settings.managedFanMode }) { i ->
         onAction(QuickAccessAction.SetFanMode(modes[i].value))
     }
     if (settings.managedFanMode == FanController.CUSTOM) {
-        items += toggleNavItem("Hold target temp", settings.fanSmartEnabled) { onAction(QuickAccessAction.SetFanSmart(!settings.fanSmartEnabled)) }
+        items += toggleNavItem(strings.qaHoldTargetTempLabel, settings.fanSmartEnabled) { onAction(QuickAccessAction.SetFanSmart(!settings.fanSmartEnabled)) }
         if (settings.fanSmartEnabled) {
-            items += stepperNavItem("Target temp", "${settings.fanTargetTempC}°C") { d ->
+            items += stepperNavItem(strings.qaTargetTempLabel, "${settings.fanTargetTempC}°C") { d ->
                 onAction(QuickAccessAction.SetFanTargetTemp(settings.fanTargetTempC + d))
             }
         } else {
             // Curve mode: the Cooler⟷Quieter live offset (steps of 5, ±FanCurve.MAX_BIAS; + = cooler/louder).
             // Curve-knee editing stays in the app — drag doesn't translate to a D-pad.
-            items += stepperNavItem("Cooler ⟷ Quieter", fanBiasLabel(settings.fanBias)) { d ->
+            items += stepperNavItem(strings.qaCoolerQuieterLabel, fanBiasLabel(settings.fanBias, strings)) { d ->
                 val next = (settings.fanBias + d * 5)
                     .coerceIn(-com.kei.pulse.model.FanCurve.MAX_BIAS, com.kei.pulse.model.FanCurve.MAX_BIAS)
                 if (next != settings.fanBias) onAction(QuickAccessAction.SetFanBias(next))
@@ -396,16 +401,9 @@ private fun fanItems(settings: AppSettings, onAction: (QuickAccessAction) -> Uni
     return items
 }
 
-/** "+10 cooler" / "0" / "−10 quieter" — the bias stepper's value readout. */
-private fun fanBiasLabel(bias: Int): String = when {
-    bias > 0 -> "+$bias cooler"
-    bias < 0 -> "$bias quieter"
-    else -> "0"
-}
-
-private fun lightingItems(settings: AppSettings, onAction: (QuickAccessAction) -> Unit): List<NavItem> {
+private fun lightingItems(settings: AppSettings, onAction: (QuickAccessAction) -> Unit, strings: PulseStrings): List<NavItem> {
     val items = mutableListOf<NavItem>()
-    items += chipNavItem("RGB mode", RgbMode.entries.map { it.label }, RgbMode.entries.indexOf(settings.rgbMode)) { i ->
+    items += chipNavItem(strings.rgbModeLabel, RgbMode.entries.map { it.localizedLabel(strings) }, RgbMode.entries.indexOf(settings.rgbMode)) { i ->
         onAction(QuickAccessAction.SetRgbMode(RgbMode.entries[i]))
     }
     if (settings.rgbMode == RgbMode.MANUAL) {
@@ -414,9 +412,9 @@ private fun lightingItems(settings: AppSettings, onAction: (QuickAccessAction) -
     return items
 }
 
-private fun overlayItems(settings: AppSettings, onAction: (QuickAccessAction) -> Unit): List<NavItem> = buildList {
-    add(toggleNavItem("Show overlay", settings.overlayEnabled) { onAction(QuickAccessAction.SetOverlayEnabled(!settings.overlayEnabled)) })
-    add(chipNavItem("Density", OverlayPreset.entries.map { it.label }, OverlayPreset.entries.indexOf(settings.overlayPreset)) { i ->
+private fun overlayItems(settings: AppSettings, onAction: (QuickAccessAction) -> Unit, strings: PulseStrings): List<NavItem> = buildList {
+    add(toggleNavItem(strings.qaShowOverlayLabel, settings.overlayEnabled) { onAction(QuickAccessAction.SetOverlayEnabled(!settings.overlayEnabled)) })
+    add(chipNavItem(strings.qaDensityLabel, OverlayPreset.entries.map { it.localizedLabel(strings) }, OverlayPreset.entries.indexOf(settings.overlayPreset)) { i ->
         onAction(QuickAccessAction.SetOverlayPreset(OverlayPreset.entries[i]))
     })
 }
@@ -425,12 +423,13 @@ private fun systemItems(
     stats: OverlayStats,
     local: MutableMap<String, Int>,
     onAction: (QuickAccessAction) -> Unit,
+    strings: PulseStrings,
 ): List<NavItem> = buildList {
     // Optimistic value wins once touched (so rapid ←/→ steps from the right base); else the live telemetry value.
     val bri = local["bri"] ?: stats.brightnessPercent ?: 50
-    add(sliderNavItem("Brightness", bri) { v -> local["bri"] = v; onAction(QuickAccessAction.SetBrightness(v)) })
+    add(sliderNavItem(strings.qaBrightnessLabel, bri) { v -> local["bri"] = v; onAction(QuickAccessAction.SetBrightness(v)) })
     val vol = local["vol"] ?: stats.volumePercent ?: 50
-    add(sliderNavItem("Volume", vol) { v -> local["vol"] = v; onAction(QuickAccessAction.SetVolume(v)) })
+    add(sliderNavItem(strings.qaVolumeLabel, vol) { v -> local["vol"] = v; onAction(QuickAccessAction.SetVolume(v)) })
 }
 
 // ---- NavItem builders: a segmented selector adjusts with D-pad ←/→; modes/toggles activate with A. ----
@@ -452,8 +451,9 @@ private fun scopeNavItem(
     hasProfile: Boolean,
     onPending: (Int?) -> Unit,
     onCommit: (Int) -> Unit,
+    strings: PulseStrings,
 ): NavItem {
-    val options = listOf("Per-Game", "Global")
+    val options = listOf(strings.qaScopePerGame, strings.qaScopeGlobal)
     val shown = pending ?: committedIndex
     val dirty = pending != null && pending != committedIndex
     fun moveTo(target: Int) = onPending(if (target == committedIndex) null else target)
@@ -461,15 +461,15 @@ private fun scopeNavItem(
         render = { focused ->
             QaFocusRow(focused) {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    QaSegmentedRow("Profile", options, shown) { i -> onCommit(i) }
+                    QaSegmentedRow(strings.qaScopeProfileTitle, options, shown) { i -> onCommit(i) }
                     if (dirty) {
                         Text(
                             if (shown == 1 && hasProfile) {
-                                "Ⓐ apply — removes this game's profile"
+                                strings.qaScopeApplyRemove
                             } else if (shown == 0) {
-                                "Ⓐ apply — gives this game its own profile"
+                                strings.qaScopeApplyCreate
                             } else {
-                                "Ⓐ apply"
+                                strings.qaScopeApply
                             },
                             color = MaterialTheme.colorScheme.primary,
                             fontSize = 10.sp,
@@ -563,8 +563,9 @@ private val RGB_SWATCHES = listOf(
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ColorSwatchRow(colors: List<Int>, selected: Int, onPick: (Int) -> Unit) {
+    val strings = LocalPulseStrings.current
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text("COLOR", color = QaColors.Muted, fontSize = 10.sp, letterSpacing = 1.sp, fontWeight = FontWeight.Medium)
+        Text(strings.rgbColorLabel.uppercase(), color = QaColors.Muted, fontSize = 10.sp, letterSpacing = 1.sp, fontWeight = FontWeight.Medium)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             colors.forEach { c ->
                 val isSel = (c or 0xFF000000.toInt()) == (selected or 0xFF000000.toInt())
@@ -604,41 +605,49 @@ private fun TelemetryStrip(stats: OverlayStats) {
     }
 }
 
-private fun tabTitle(tab: QuickAccessTab): String = when (tab) {
-    QuickAccessTab.PERFORMANCE -> "Performance"
-    QuickAccessTab.FAN -> "Fan"
-    QuickAccessTab.RGB -> "Lighting"
-    QuickAccessTab.OVERLAY -> "Overlay"
-    QuickAccessTab.SYSTEM -> "System"
+private fun tabTitle(tab: QuickAccessTab, strings: PulseStrings): String = when (tab) {
+    QuickAccessTab.PERFORMANCE -> strings.qaTabPerformance
+    QuickAccessTab.FAN -> strings.qaTabFan
+    QuickAccessTab.RGB -> strings.qaTabRgb
+    QuickAccessTab.OVERLAY -> strings.qaTabOverlay
+    QuickAccessTab.SYSTEM -> strings.qaTabSystem
 }
 
-private fun biasLabel(b: AutoTdpBias): String = when (b) {
-    AutoTdpBias.EFFICIENT -> "Efficient"
-    AutoTdpBias.BALANCED -> "Balanced"
-    AutoTdpBias.SMOOTH -> "Smooth"
+private fun fanModeLabel(mode: Int, strings: PulseStrings): String = when (mode) {
+    FanController.SILENT -> strings.fanModeQuiet
+    FanController.SMART -> strings.fanModeSmart
+    FanController.SPORT -> strings.fanModeMax
+    FanController.CUSTOM -> strings.fanModeCustom
+    else -> FanController.MODES.firstOrNull { it.value == mode }?.label ?: mode.toString()
+}
+
+private fun fanBiasLabel(bias: Int, strings: PulseStrings): String = when {
+    bias > 0 -> "+$bias ${strings.qaFanCooler}"
+    bias < 0 -> "$bias ${strings.qaFanQuieter}"
+    else -> "0"
 }
 
 /**
  * The footer confirmation for an applied action ("Bias Smooth", "Fan Sport"). Null = the control provides its
  * own feedback (sliders show their value live; the scope commit flashes a richer message of its own).
  */
-private fun flashLabel(a: QuickAccessAction): String? = when (a) {
-    QuickAccessAction.ToggleAutoTdp -> "Mode: AutoTDP"
-    is QuickAccessAction.SetTier -> "Mode: ${a.tier.label}"
-    QuickAccessAction.SetStockMode -> "Mode: Stock"
-    is QuickAccessAction.SetFpsTarget -> "Frame target ${a.fps}"
-    is QuickAccessAction.SetBias -> "Bias ${biasLabel(a.bias)}"
-    is QuickAccessAction.SetAggressivePark -> "Aggressive park ${if (a.enabled) "on" else "off"}"
-    is QuickAccessAction.SetFanMode -> "Fan ${FanController.MODES.firstOrNull { it.value == a.mode }?.label ?: a.mode}"
-    is QuickAccessAction.SetFanSmart -> "Hold target temp ${if (a.enabled) "on" else "off"}"
-    is QuickAccessAction.SetFanTargetTemp -> "Target temp ${a.tempC}°C"
-    is QuickAccessAction.SetFanBias -> "Fan bias ${fanBiasLabel(a.bias)}"
-    is QuickAccessAction.SetPowerTarget -> "Power target ${a.percent}%"
-    is QuickAccessAction.SetGpuCap -> "GPU cap ${a.freqKhz / 1000} MHz"
-    is QuickAccessAction.SetRgbMode -> "Lighting ${a.mode.label}"
-    is QuickAccessAction.SetRgbColor -> "Color applied"
-    is QuickAccessAction.SetOverlayEnabled -> "Overlay ${if (a.enabled) "on" else "off"}"
-    is QuickAccessAction.SetOverlayPreset -> "Overlay ${a.preset.label}"
+private fun flashLabel(a: QuickAccessAction, strings: PulseStrings): String? = when (a) {
+    QuickAccessAction.ToggleAutoTdp -> "${strings.qaModePrefix}: AutoTDP"
+    is QuickAccessAction.SetTier -> "${strings.qaModePrefix}: ${a.tier.localizedLabel(strings)}"
+    QuickAccessAction.SetStockMode -> "${strings.qaModePrefix}: ${strings.powerTierStock}"
+    is QuickAccessAction.SetFpsTarget -> "${strings.qaFrameTargetLabel} ${if (a.fps <= 0) strings.maxStr else a.fps.toString()}"
+    is QuickAccessAction.SetBias -> "${strings.qaBiasLabel} ${a.bias.localizedLabel(strings)}"
+    is QuickAccessAction.SetAggressivePark -> "${strings.autoTdpAggressivePark} ${if (a.enabled) strings.on else strings.off}"
+    is QuickAccessAction.SetFanMode -> "${strings.fanSectionTitle} ${fanModeLabel(a.mode, strings)}"
+    is QuickAccessAction.SetFanSmart -> "${strings.qaHoldTargetTempLabel} ${if (a.enabled) strings.on else strings.off}"
+    is QuickAccessAction.SetFanTargetTemp -> "${strings.qaTargetTempLabel} ${a.tempC}°C"
+    is QuickAccessAction.SetFanBias -> "${strings.qaFanBiasLabel} ${fanBiasLabel(a.bias, strings)}"
+    is QuickAccessAction.SetPowerTarget -> "${strings.qaPowerTargetLabel} ${a.percent}%"
+    is QuickAccessAction.SetGpuCap -> "${strings.qaGpuCapLabel} ${a.freqKhz / 1000} MHz"
+    is QuickAccessAction.SetRgbMode -> "${strings.qaTabRgb} ${a.mode.localizedLabel(strings)}"
+    is QuickAccessAction.SetRgbColor -> strings.qaColorApplied
+    is QuickAccessAction.SetOverlayEnabled -> "${strings.qaTabOverlay} ${if (a.enabled) strings.on else strings.off}"
+    is QuickAccessAction.SetOverlayPreset -> "${strings.qaTabOverlay} ${a.preset.localizedLabel(strings)}"
     is QuickAccessAction.SetBrightness, is QuickAccessAction.SetVolume -> null
     is QuickAccessAction.SetScope -> null
 }

@@ -17,6 +17,7 @@ import com.kei.pulse.tile.QuickSettingsTileRefresher
 import com.kei.pulse.ui.CompactTunerScreen
 import com.kei.pulse.ui.TunerViewModel
 import com.kei.pulse.ui.theme.PulseTheme
+import com.kei.pulse.i18n.resolvePulseStrings
 import kotlinx.coroutines.launch
 
 class TileControlActivity : ComponentActivity() {
@@ -88,13 +89,14 @@ class TileControlActivity : ComponentActivity() {
                 isReset = appliedProfile?.id == ProfileStateResolver.STOCK_PROFILE_ID,
                 appliedDisplayProfileId = appliedProfile?.id ?: ProfileStateResolver.MANUAL_PROFILE_ID,
             )
+            val strings = resolvePulseStrings(viewModel.settings.value.appLanguage)
             result.onSuccess {
                 container.repository.selectProfile(
                     appliedProfile?.id?.takeUnless { id -> id == ProfileStateResolver.STOCK_PROFILE_ID },
                 )
                 Toast.makeText(
                     applicationContext,
-                    "Applied ${appliedProfile?.name ?: "Manual"}",
+                    String.format(strings.toastAppliedProfile, appliedProfile?.name ?: strings.toastAppliedManual),
                     Toast.LENGTH_SHORT,
                 ).show()
                 dismissTileDialog()
@@ -102,7 +104,7 @@ class TileControlActivity : ComponentActivity() {
             }.onFailure { throwable ->
                 Toast.makeText(
                     applicationContext,
-                    throwable.message ?: "Failed to apply limits",
+                    throwable.message ?: String.format(strings.toastFailedToApply, "limits"),
                     Toast.LENGTH_LONG,
                 ).show()
             }

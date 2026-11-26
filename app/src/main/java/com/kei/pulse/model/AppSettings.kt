@@ -1,5 +1,8 @@
 package com.kei.pulse.model
 
+import com.kei.pulse.i18n.AppLanguage
+import com.kei.pulse.i18n.PulseStrings
+
 enum class AppColorSource {
     SYSTEM,
     CUSTOM_ACCENT,
@@ -11,7 +14,23 @@ enum class PulseThemeId(val label: String, val tagline: String) {
     CRIMSON("Crimson", "Embers of a dying star"),
     CYBERPUNK("Cyberpunk", "Neon grid"),
     RONIN("Ronin", "Ink, blade, and autumn"),
-    ADASTRA("Ad Astra", "To the stars"),
+    ADASTRA("Ad Astra", "To the stars");
+
+    fun localizedLabel(strings: PulseStrings): String = when (this) {
+        SIGNAL -> strings.themeSignalLabel
+        CRIMSON -> strings.themeCrimsonLabel
+        CYBERPUNK -> strings.themeCyberpunkLabel
+        RONIN -> strings.themeRoninLabel
+        ADASTRA -> strings.themeAdAstraLabel
+    }
+
+    fun localizedTagline(strings: PulseStrings): String = when (this) {
+        SIGNAL -> strings.themeSignalTagline
+        CRIMSON -> strings.themeCrimsonTagline
+        CYBERPUNK -> strings.themeCyberpunkTagline
+        RONIN -> strings.themeRoninTagline
+        ADASTRA -> strings.themeAdAstraTagline
+    }
 }
 
 enum class TileInteractionBehavior {
@@ -68,7 +87,13 @@ enum class OverlayPreset(val label: String, val elements: Set<OverlayElement>) {
             OverlayElement.SESSION_TIMER,
         ),
     ),
-    FULL("Full", OverlayElement.entries.toSet()),
+    FULL("Full", OverlayElement.entries.toSet());
+
+    fun localizedLabel(strings: PulseStrings): String = when (this) {
+        COMPACT -> strings.overlayPresetCompact
+        DETAILED -> strings.overlayPresetDetailed
+        FULL -> strings.overlayPresetFull
+    }
 }
 
 /**
@@ -80,17 +105,31 @@ enum class RgbMode(val label: String) {
     OFF("Off"),
     BATTERY("Battery"),
     HEAT("Heat"),
-    MANUAL("Manual"),
+    MANUAL("Manual");
+
+    fun localizedLabel(strings: PulseStrings): String = when (this) {
+        OFF -> strings.off
+        BATTERY -> strings.rgbModeBattery
+        HEAT -> strings.rgbModeHeat
+        MANUAL -> strings.rgbModeManual
+    }
 }
 
 /** Which joystick LED(s) the Manual RGB controls edit. */
 enum class RgbStick(val label: String) {
     LEFT("Left"),
     RIGHT("Right"),
-    BOTH("Both"),
+    BOTH("Both");
+
+    fun localizedLabel(strings: PulseStrings): String = when (this) {
+        LEFT -> strings.rgbStickLeft
+        RIGHT -> strings.rgbStickRight
+        BOTH -> strings.rgbStickBoth
+    }
 }
 
 data class AppSettings(
+    val appLanguage: AppLanguage = AppLanguage.SYSTEM,
     val themeId: PulseThemeId = PulseThemeId.SIGNAL,
     val colorSource: AppColorSource = AppColorSource.SYSTEM,
     val accentColor: Int = 0xFF3F51B5.toInt(),

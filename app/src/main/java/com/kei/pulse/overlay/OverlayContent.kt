@@ -35,6 +35,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kei.pulse.data.TelemetrySnapshot
+import com.kei.pulse.i18n.LocalPulseStrings
+import com.kei.pulse.i18n.PulseStrings
 import com.kei.pulse.model.OverlayElement
 import com.kei.pulse.model.OverlayPreset
 import kotlinx.coroutines.flow.StateFlow
@@ -127,6 +129,7 @@ private fun DockedBar(
 ) {
     val t = stats.telemetry
     val els = config.elements
+    val strings = LocalPulseStrings.current
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -155,20 +158,20 @@ private fun DockedBar(
             if (OverlayElement.CPU_TEMP in els) Inline("°C", num(t.cpuTempC), tempColor(t.cpuTempC))
             if (OverlayElement.POWER in els) Inline("W", powerValue(stats), MaterialTheme.colorScheme.onSurface)
             if (OverlayElement.BATTERY_LEFT in els) {
-                Inline(if (t.isDischarging) "LEFT" else "FULL", leftText(stats.minutesLeft), MaterialTheme.colorScheme.onSurface)
+                Inline(if (t.isDischarging) strings.osdLeft else strings.osdFull, leftText(stats.minutesLeft), MaterialTheme.colorScheme.onSurface)
             }
             if (isThrottling(t)) ThrottlePill()
             if (!config.locked) {
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(
-                        "⤢ LAYOUT",
+                        "⤢ ${strings.osdLayout}",
                         fontSize = 9.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = accent,
                         modifier = Modifier.clickable { onCyclePreset() },
                     )
                     Text(
-                        "🔒 LOCK",
+                        "🔒 ${strings.osdLock}",
                         fontSize = 9.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = accent,
@@ -182,21 +185,22 @@ private fun DockedBar(
 
 @Composable
 private fun ControlRow(onCyclePreset: () -> Unit, onToggleLock: () -> Unit) {
+    val strings = LocalPulseStrings.current
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(
-            "✥ DRAG",
+            "✥ ${strings.osdDrag}",
             fontSize = 9.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Text(
-            "⤢ LAYOUT",
+            "⤢ ${strings.osdLayout}",
             fontSize = 9.sp,
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.primary,
             modifier = Modifier.clickable { onCyclePreset() },
         )
         Text(
-            "🔒 LOCK",
+            "🔒 ${strings.osdLock}",
             fontSize = 9.sp,
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.primary,
@@ -207,8 +211,9 @@ private fun ControlRow(onCyclePreset: () -> Unit, onToggleLock: () -> Unit) {
 
 @Composable
 private fun ThrottlePill() {
+    val strings = LocalPulseStrings.current
     Text(
-        "⚠ THERMAL",
+        "⚠ ${strings.osdThermal}",
         fontSize = 9.sp,
         fontWeight = FontWeight.Bold,
         color = Color.White,
@@ -225,14 +230,15 @@ private fun Set<OverlayElement>.any(vararg e: OverlayElement): Boolean = e.any {
 @Composable
 private fun DetailedPanel(stats: OverlayStats, els: Set<OverlayElement>) {
     val t = stats.telemetry
+    val strings = LocalPulseStrings.current
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         if (els.any(OverlayElement.FPS, OverlayElement.FPS_TREND, OverlayElement.SESSION_TIMER)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 if (OverlayElement.FPS in els) BigFps(stats.fps?.fps)
                 if (OverlayElement.FPS_TREND in els) {
                     Column {
-                        Text("AVG ${fpsText(stats.fps?.avgFps)}", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text("LOW ${fpsText(stats.fps?.onePercentLowFps)}", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("${strings.osdAvg} ${fpsText(stats.fps?.avgFps)}", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("${strings.osdLow} ${fpsText(stats.fps?.onePercentLowFps)}", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
                 if (OverlayElement.SESSION_TIMER in els) {
@@ -247,7 +253,7 @@ private fun DetailedPanel(stats: OverlayStats, els: Set<OverlayElement>) {
                 if (OverlayElement.GPU_CLOCK in els) Metric("GPU", num(t.gpuMhz), "MHz", MaterialTheme.colorScheme.tertiary)
                 if (OverlayElement.GPU_TEMP in els) Metric("GPU", num(t.gpuTempC), "°C", tempColor(t.gpuTempC))
                 if (OverlayElement.POWER in els) Metric("PWR", powerValue(stats), "W", MaterialTheme.colorScheme.onSurface)
-                if (OverlayElement.BATTERY_LEFT in els) Metric("BAT", leftText(stats.minutesLeft), if (t.isDischarging) "LEFT" else "FULL", MaterialTheme.colorScheme.onSurface)
+                if (OverlayElement.BATTERY_LEFT in els) Metric("BAT", leftText(stats.minutesLeft), if (t.isDischarging) strings.osdLeft else strings.osdFull, MaterialTheme.colorScheme.onSurface)
             }
         }
         if (els.any(OverlayElement.CPU_LOAD, OverlayElement.CPU_CLOCK, OverlayElement.CPU_TEMP, OverlayElement.RAM)) {
@@ -267,6 +273,7 @@ private fun FullPanel(stats: OverlayStats, els: Set<OverlayElement>) {
     val t = stats.telemetry
     val tertiary = MaterialTheme.colorScheme.tertiary
     val primary = MaterialTheme.colorScheme.primary
+    val strings = LocalPulseStrings.current
     Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
         if (els.any(OverlayElement.SOC_NAME, OverlayElement.SESSION_TIMER)) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -290,8 +297,8 @@ private fun FullPanel(stats: OverlayStats, els: Set<OverlayElement>) {
                 if (OverlayElement.FPS in els) BigFps(stats.fps?.fps)
                 if (OverlayElement.FPS_TREND in els) {
                     Column {
-                        Text("AVG ${fpsText(stats.fps?.avgFps)}", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text("LOW ${fpsText(stats.fps?.onePercentLowFps)}", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("${strings.osdAvg} ${fpsText(stats.fps?.avgFps)}", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("${strings.osdLow} ${fpsText(stats.fps?.onePercentLowFps)}", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Text("${fmt1(stats.fps?.frameTimeMs)} ms", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     stats.fps?.recentFps?.let { Sparkline(it, primary, Modifier.size(width = 64.dp, height = 22.dp)) }
@@ -305,7 +312,7 @@ private fun FullPanel(stats: OverlayStats, els: Set<OverlayElement>) {
                 if (OverlayElement.GPU_CLOCK in els) Metric("GPU", num(t.gpuMhz), "MHz", tertiary)
                 if (OverlayElement.GPU_TEMP in els) Metric("GPU", num(t.gpuTempC), "°C", tempColor(t.gpuTempC))
                 if (OverlayElement.POWER in els) Metric("PWR", powerValue(stats), "W", MaterialTheme.colorScheme.onSurface)
-                if (OverlayElement.BATTERY_LEFT in els) Metric("BAT", leftText(stats.minutesLeft), if (t.isDischarging) "LEFT" else "FULL", MaterialTheme.colorScheme.onSurface)
+                if (OverlayElement.BATTERY_LEFT in els) Metric("BAT", leftText(stats.minutesLeft), if (t.isDischarging) strings.osdLeft else strings.osdFull, MaterialTheme.colorScheme.onSurface)
             }
         }
         // CPU + per-core bars
@@ -362,11 +369,12 @@ private fun AutoTdpRow(a: AutoTdpReadout, showClocks: Boolean) {
     val primary = MaterialTheme.colorScheme.primary
     val tertiary = MaterialTheme.colorScheme.tertiary
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
+    val strings = LocalPulseStrings.current
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Bottom) {
             Text("AUTOTDP", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = primary)
-            Text("→ ${if (a.targetFps <= 0) "MAX" else "${a.targetFps}"} fps", fontSize = 9.sp, color = muted)
-            if (a.primeParked) Text("PARK", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = MeterCool)
+            Text("→ ${if (a.targetFps <= 0) strings.maxStr else "${a.targetFps}"} fps", fontSize = 9.sp, color = muted)
+            if (a.primeParked) Text(strings.osdPark, fontSize = 9.sp, fontWeight = FontWeight.Bold, color = MeterCool)
             Text(
                 if (a.learned) "LRN ✓" else "LRN ${a.learningPercent}%",
                 fontSize = 9.sp,

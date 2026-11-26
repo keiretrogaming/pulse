@@ -3,6 +3,9 @@ package com.kei.pulse.ui
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.kei.pulse.i18n.AppLanguage
+import com.kei.pulse.i18n.PulseStrings
+import com.kei.pulse.i18n.resolvePulseStrings
 import com.kei.pulse.data.DisplayController
 import com.kei.pulse.data.GovernorController
 import com.kei.pulse.data.GovernorOption
@@ -82,6 +85,17 @@ class TunerViewModel(
         started = SharingStarted.WhileSubscribed(5_000),
         initialValue = AppSettings(),
     )
+
+    private fun currentStrings(): PulseStrings = resolvePulseStrings(settings.value.appLanguage)
+
+    private fun fanLabel(mode: Int?, strings: PulseStrings = currentStrings()): String = when (mode) {
+        FanController.SILENT -> strings.fanModeQuiet
+        FanController.SMART -> strings.fanModeSmart
+        FanController.SPORT -> strings.fanModeMax
+        FanController.CUSTOM -> strings.fanModeCustom
+        null -> "—"
+        else -> "${strings.qaModePrefix} $mode"
+    }
 
     val perAppEnabled: StateFlow<Boolean> = (perAppConfigStorage?.enabled ?: flowOf(false))
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
@@ -166,8 +180,9 @@ class TunerViewModel(
         viewModelScope.launch {
             val ok = withContext(Dispatchers.IO) { cpuFloorController.setFloor(state.value.policies, percent) }
             applySideControls(TierTransition.afterCpuFloor(currentSideControls(), percent))
-            transientMessage.value = if (percent <= 0) "CPU floor cleared" else "CPU floor set to ~$percent%"
-            transientError.value = if (ok) null else "Couldn't set CPU floor"
+            val strings = currentStrings()
+            transientMessage.value = if (percent <= 0) strings.toastCpuFloorCleared else String.format(strings.toastCpuFloorSet, percent)
+            transientError.value = if (ok) null else String.format(strings.toastFailedToApply, strings.cpuFloorLabel)
             persistTuning()
         }
     }
@@ -306,7 +321,7 @@ class TunerViewModel(
             val policies = state.value.policies
             // Prime = the CPU policy with the highest max freq (same rule used everywhere; never policy-id).
             val prime = policies.filterNot { it.isGpu }.maxByOrNull { it.selectableMaxFreq }
-                ?: run { transientError.value = "No Prime core found"; return@launch }
+                ?: run { transientError.value = currentStrings().toastPrimeNotFound; return@launch }
             val freqs = prime.supportedFrequencies
             val targetKHz = if (limited) {
                 freqs.getOrNull(freqs.size - 2) ?: freqs.last()
@@ -322,7 +337,8 @@ class TunerViewModel(
                 AutoTuneController.applyFreqsToDevice(policies, mapOf(prime.id to targetKHz))
             }
             applySideControls(TierTransition.afterPrimeBoost(currentSideControls(), limited))
-            transientMessage.value = if (limited) "Prime boost limited" else "Prime boost restored"
+            val strings = currentStrings()
+            transientMessage.value = if (limited) strings.toastPrimeBoostLimited else strings.toastPrimeBoostRestored
             persistTuning()
         }
     }
@@ -336,7 +352,7 @@ class TunerViewModel(
     fun setGpuLocked(locked: Boolean) {
         val gpu = state.value.policies.firstOrNull { it.isGpu }
         if (gpu == null) {
-            transientError.value = "No GPU detected"
+            transientError.value = currentStrings().toastGpuNotFound
             return
         }
         val freqs = gpu.supportedFrequencies
@@ -346,18 +362,19 @@ class TunerViewModel(
                 val pinned = withContext(Dispatchers.IO) { gpuFloorController.lockToCurrentCap(gpu.policyPath) }
                 // Lock clears the GPU floor (the interlink rule, now a single tested source of truth).
                 applySideControls(TierTransition.afterGpuLock(currentSideControls(), locked = true))
+                val strings = currentStrings()
                 transientMessage.value = if (pinned != null) {
                     val mhz = freqs.getOrNull(n - 1 - pinned)?.div(1000)
-                    if (mhz != null) "GPU locked at $mhz MHz" else "GPU locked (level $pinned)"
+                    if (mhz != null) String.format(strings.toastGpuLocked, mhz) else String.format(strings.toastGpuLocked, pinned)
                 } else {
-                    "Couldn't read the GPU clock to lock"
+                    String.format(strings.toastFailedToApply, "GPU")
                 }
             } else {
                 withContext(Dispatchers.IO) {
                     gpuFloorController.setFloorLevel(gpu.policyPath, (n - 1).coerceAtLeast(0))
                 }
                 applySideControls(TierTransition.afterGpuLock(currentSideControls(), locked = false))
-                transientMessage.value = "GPU unlocked"
+                transientMessage.value = currentStrings().toastGpuUnlocked
             }
             transientError.value = null
             persistTuning()
@@ -521,14 +538,16 @@ class TunerViewModel(
         )
         result.onSuccess { outcome ->
             _activeTier.value = PowerTier.CUSTOM
+            val strings = currentStrings()
             transientMessage.value = if (outcome.verificationPassed) {
-                "Power target set to $percent%"
+                String.format(strings.toastPowerTargetSet, percent)
             } else {
-                buildVerificationFailureMessage(snapshot, outcome.actualValues, outcome.commandOutput)
+                buildVerificationFailureMessage(snapshot, outcome.actualValues, outcome.commandOutput, strings)
             }
             transientError.value = null
         }.onFailure { throwable ->
-            transientError.value = throwable.message ?: "Failed to set power target"
+            val strings = currentStrings()
+            transientError.value = localizeErrorMessage(throwable.message, strings) ?: strings.toastFailedPowerTarget
         }
         reapplyGpuLock()
     }
@@ -594,8 +613,9 @@ class TunerViewModel(
             if (chosen != null) _governor.value = chosen
             // A manual chip pick while in Custom is remembered, so cycling back restores it.
             if (chosen != null && _activeTier.value == PowerTier.CUSTOM) persistTuning()
+            val strings = currentStrings()
             transientMessage.value =
-                if (chosen != null) "CPU governor: ${option.label}" else "Couldn't set governor"
+                if (chosen != null) String.format(strings.toastGovernorSet, option.localizedLabel(strings)) else strings.toastGovernorFailed
             transientError.value = null
         }
     }
@@ -604,7 +624,7 @@ class TunerViewModel(
         viewModelScope.launch {
             withContext(Dispatchers.IO) { refreshRateController.setRate(hz) }
             _refreshRate.value = hz
-            transientMessage.value = "Refresh rate set to ${hz}Hz"
+            transientMessage.value = String.format(currentStrings().toastRefreshRateSet, hz)
             transientError.value = null
         }
     }
@@ -612,14 +632,15 @@ class TunerViewModel(
     fun setGpuFloorPercent(percent: Int) {
         val gpu = state.value.policies.firstOrNull { it.isGpu }
         if (gpu == null) {
-            transientError.value = "No GPU detected"
+            transientError.value = currentStrings().toastGpuNotFound
             return
         }
         viewModelScope.launch {
             val floorLevel = gpuFloorLevelFor(gpu, percent)
             withContext(Dispatchers.IO) { gpuFloorController.setFloorLevel(gpu.policyPath, floorLevel) }
             applySideControls(TierTransition.afterGpuFloor(currentSideControls(), percent))
-            transientMessage.value = if (percent <= 0) "GPU floor cleared" else "GPU floor set to ~$percent%"
+            val strings = currentStrings()
+            transientMessage.value = if (percent <= 0) strings.toastGpuFloorCleared else String.format(strings.toastGpuFloorSet, percent)
             transientError.value = null
             persistTuning()
         }
@@ -713,10 +734,11 @@ class TunerViewModel(
             // Remember it so the watcher re-asserts it against the system Fan tile; onSaved starts that watcher.
             settingsStorage.persistManagedFanMode(mode)
             onSaved()
+            val strings = currentStrings()
             transientMessage.value = if (ok) {
-                "Fan set to ${FanController.labelFor(mode)}"
+                String.format(strings.toastFanSet, fanLabel(mode, strings))
             } else {
-                "Couldn't change fan mode"
+                strings.toastFanChangeFailed
             }
             transientError.value = null
         }
@@ -785,16 +807,17 @@ class TunerViewModel(
                 FanController.customFanAvailable()
             }
             if (!supported) {
-                transientError.value = "Custom fan isn't available on this device"
+                transientError.value = currentStrings().toastFanUnavailable
                 return@launch
             }
             _fanCalibrating.value = true
-            transientMessage.value = "Calibrating fan — sweeping speeds (~15s)…"
+            transientMessage.value = currentStrings().toastFanCalibrating
             val cal = withContext(Dispatchers.IO) { runFanSweep() }
             settingsStorage.persistFanCurve(cal.recommendedCurve)
             _fanCalibrating.value = false
+            val strings = currentStrings()
             transientMessage.value =
-                "Fan calibrated · idle ${cal.minSpinPercent}% · comfort ${cal.comfortPercent}% · ${cal.maxRpm} RPM max"
+                String.format(strings.toastFanCalibrated, cal.minSpinPercent, cal.comfortPercent, cal.maxRpm)
             transientError.value = null
             onDone() // restart the watcher so the new curve + Custom mode re-engage and retake the fan
         }
@@ -825,15 +848,16 @@ class TunerViewModel(
             val native = _nativeDisplay.value
                 ?: withContext(Dispatchers.IO) { displayController.readNative() }?.also { _nativeDisplay.value = it }
             if (native == null) {
-                transientError.value = "Couldn't read display size"
+                transientError.value = currentStrings().toastResolutionFailed
                 return@launch
             }
             withContext(Dispatchers.IO) { displayController.applyScale(native, percent) }
             _resolutionScale.value = percent
+            val strings = currentStrings()
             transientMessage.value = if (percent >= 100) {
-                "Resolution reset to native"
+                strings.toastResolutionReset
             } else {
-                "Render scale set to $percent%"
+                String.format(strings.toastRenderScaleSet, percent)
             }
             transientError.value = null
         }
@@ -870,7 +894,7 @@ class TunerViewModel(
                 }
                 persistTuning()
                 result.onSuccess {
-                    transientMessage.value = "Restored Custom"
+                    transientMessage.value = currentStrings().toastAppliedManual
                     transientError.value = null
                 }
                 onApplied(PowerTier.CUSTOM.label)
@@ -935,15 +959,18 @@ class TunerViewModel(
                     }
                 }
                 persistTuning()
+                val strings = currentStrings()
                 transientMessage.value = if (outcome.verificationPassed) {
-                    "Applied ${tier.label}"
+                    String.format(strings.toastAppliedTier, tier.localizedLabel(strings))
                 } else {
-                    buildVerificationFailureMessage(snapshot, outcome.actualValues, outcome.commandOutput)
+                    buildVerificationFailureMessage(snapshot, outcome.actualValues, outcome.commandOutput, strings)
                 }
                 transientError.value = null
                 onApplied(tier.label)
             }.onFailure { throwable ->
-                transientError.value = throwable.message ?: "Failed to apply ${tier.label}"
+                val strings = currentStrings()
+                transientError.value = localizeErrorMessage(throwable.message, strings)
+                    ?: String.format(strings.toastFailedToApply, tier.localizedLabel(strings))
             }
             reapplyGpuLock()
         }
@@ -1032,19 +1059,22 @@ class TunerViewModel(
             )
             applyResult.onSuccess { outcome ->
                 edits.value = emptyMap()
+                val strings = currentStrings()
                 transientMessage.value = if (outcome.verificationPassed) {
-                    buildAppliedMessage(appliedProfile, outcome.commandOutput)
+                    buildAppliedMessage(appliedProfile, outcome.commandOutput, strings)
                 } else {
-                    buildVerificationFailureMessage(state, outcome.actualValues, outcome.commandOutput)
+                    buildVerificationFailureMessage(state, outcome.actualValues, outcome.commandOutput, strings)
                 }
                 transientError.value = null
             }.onFailure { throwable ->
-                transientError.value = throwable.message ?: "Failed to apply limits"
+                val strings = currentStrings()
+                transientError.value = localizeErrorMessage(throwable.message, strings)
+                    ?: String.format(strings.toastFailedToApply, strings.tierCustomLabel)
             }
             if (applyResult.isSuccess) {
                 reapplyGpuLock()
                 repository.selectProfile(appliedProfile?.id?.takeUnless { it == ProfileStateResolver.STOCK_PROFILE_ID })
-                onApplied(appliedProfile?.name ?: "Manual")
+                onApplied(appliedProfile?.name ?: currentStrings().tierCustomLabel)
             }
         }
     }
@@ -1059,16 +1089,16 @@ class TunerViewModel(
     fun createUserProfile(name: String, state: TunerState) {
         val trimmedName = name.trim()
         if (trimmedName.isBlank()) {
-            transientError.value = "Profile name is required"
+            transientError.value = currentStrings().toastProfileNameRequired
             return
         }
         viewModelScope.launch {
             if (hasDuplicateProfileName(trimmedName, excludedId = null, state = state)) {
-                transientError.value = "Profile name already exists"
+                transientError.value = currentStrings().toastProfileNameExists
                 return@launch
             }
             repository.createUserProfile(trimmedName, state.currentValues)
-            transientMessage.value = "Saved profile \"$trimmedName\""
+            transientMessage.value = String.format(currentStrings().toastProfileSaved, trimmedName)
             transientError.value = null
         }
     }
@@ -1076,16 +1106,16 @@ class TunerViewModel(
     fun updateProfile(profileId: String, name: String, state: TunerState) {
         val trimmedName = name.trim()
         if (trimmedName.isBlank()) {
-            transientError.value = "Profile name is required"
+            transientError.value = currentStrings().toastProfileNameRequired
             return
         }
         viewModelScope.launch {
             if (hasDuplicateProfileName(trimmedName, excludedId = profileId, state = state)) {
-                transientError.value = "Profile name already exists"
+                transientError.value = currentStrings().toastProfileNameExists
                 return@launch
             }
             repository.updateProfile(profileId, trimmedName, state.currentValues)
-            transientMessage.value = "Updated profile \"$trimmedName\""
+            transientMessage.value = String.format(currentStrings().toastProfileUpdated, trimmedName)
             transientError.value = null
         }
     }
@@ -1093,7 +1123,7 @@ class TunerViewModel(
     fun deleteProfile(profileId: String) {
         viewModelScope.launch {
             repository.deleteProfile(profileId)
-            transientMessage.value = "Deleted profile"
+            transientMessage.value = currentStrings().toastProfileDeleted
             transientError.value = null
         }
     }
@@ -1107,7 +1137,7 @@ class TunerViewModel(
     fun resetProfilesToDefault() {
         viewModelScope.launch {
             repository.resetProfilesToDefault()
-            transientMessage.value = "Restored bundled profiles and removed custom profiles"
+            transientMessage.value = currentStrings().toastProfilesResetDone
             transientError.value = null
         }
     }
@@ -1118,11 +1148,7 @@ class TunerViewModel(
 
     suspend fun importProfilesJson(rawJson: String): Int {
         val importedCount = repository.importProfilesJson(rawJson)
-        transientMessage.value = if (importedCount == 1) {
-            "Imported 1 profile"
-        } else {
-            "Imported $importedCount profiles"
-        }
+        transientMessage.value = String.format(currentStrings().toastProfilesImportCount, importedCount)
         transientError.value = null
         return importedCount
     }
@@ -1157,6 +1183,12 @@ class TunerViewModel(
     fun setSleepProfile(profileId: String?) {
         viewModelScope.launch {
             settingsStorage.persistSleepProfileId(profileId)
+        }
+    }
+
+    fun setAppLanguage(language: AppLanguage) {
+        viewModelScope.launch {
+            settingsStorage.persistAppLanguage(language)
         }
     }
 
@@ -1259,11 +1291,12 @@ class TunerViewModel(
     private fun buildAppliedMessage(
         appliedProfile: PerformanceProfile?,
         commandOutput: String?,
+        strings: PulseStrings = currentStrings(),
     ): String {
         val base = if (appliedProfile != null) {
-            "Applied profile: ${appliedProfile.name}"
+            String.format(strings.toastAppliedProfile, appliedProfile.name)
         } else {
-            "Applied profile: Manual"
+            strings.toastAppliedManual
         }
         return commandOutput?.takeIf { it.isNotBlank() }?.let { "$base | log: ${it.take(120)}" } ?: base
     }
@@ -1272,15 +1305,34 @@ class TunerViewModel(
         state: TunerState,
         actualValues: Map<Int, Int>,
         commandOutput: String?,
+        strings: PulseStrings = currentStrings(),
     ): String {
         val summary = state.policies.joinToString(", ") { policy ->
             val requested = state.currentValues[policy.id] ?: policy.currentMaxFreq
             val actual = actualValues[policy.id] ?: policy.currentMaxFreq
-            "C${policy.id} requested ${formatFrequency(requested)}, " +
-                "actual ${formatFrequency(actual, boosted = actual > policy.selectableMaxFreq)}"
+            "C${policy.id} ${strings.verifyRequested} ${formatFrequency(requested)}, " +
+                "${strings.verifyActual} ${formatFrequency(actual, boosted = actual > policy.selectableMaxFreq)}"
         }
-        val base = "Apply did not stick: $summary"
+        val base = String.format(strings.toastApplyFailed, summary)
         return commandOutput?.takeIf { it.isNotBlank() }?.let { "$base | log: ${it.take(120)}" } ?: base
+    }
+
+    private fun localizeErrorMessage(message: String?, strings: PulseStrings): String? {
+        if (message == null) return null
+        return when {
+            message.contains("PServer not available") -> strings.errorPserverUnavailable
+            message.contains("No CPU clusters found") -> strings.errorNoCpuClusters
+            message.contains("No saved Custom configuration") -> strings.errorNoCustomConfig
+            message.contains("No GPU policy found") -> strings.errorNoGpuPolicy
+            message.contains("Profile is unavailable") -> strings.errorProfileUnavailable
+            message.contains("Sleep profile is unavailable") -> strings.errorSleepProfileUnavailable
+            message.contains("No sleep restore state") -> strings.errorNoSleepRestoreState
+            message.contains("No stored values to apply") -> strings.errorNoStoredValues
+            message.contains("No stored values match detected policies") -> strings.errorNoStoredValuesMatch
+            message.contains("Tile controls are unavailable") -> strings.errorTileUnavailable
+            message.contains("No profiles available for tile cycling") -> strings.errorNoProfilesForCycling
+            else -> message
+        }
     }
 
     companion object {

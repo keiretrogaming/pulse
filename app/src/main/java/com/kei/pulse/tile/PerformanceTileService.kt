@@ -21,6 +21,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import com.kei.pulse.i18n.PulseStrings
+import com.kei.pulse.i18n.resolvePulseStrings
+import com.kei.pulse.i18n.AppLanguage
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -154,6 +157,9 @@ class PerformanceTileService : TileService() {
         if (effectiveId == ProfileStateResolver.MANUAL_PROFILE_ID) {
             return getString(R.string.tile_state_manual)
         }
+        if (effectiveId == ProfileStateResolver.STOCK_PROFILE_ID) {
+            return getString(R.string.power_tier_stock)
+        }
         return state.displayProfiles.firstOrNull { it.id == effectiveId }?.name
             ?: state.activeDisplayProfileName
     }
@@ -176,10 +182,11 @@ class PerformanceTileService : TileService() {
 
     private fun handleTap() {
         serviceScope.launch {
+            val container = AppContainer(applicationContext)
+            val settings = runCatching { container.settingsStorage.settings.first() }.getOrNull()
             runCatching {
-                val container = AppContainer(applicationContext)
-                val settings = container.settingsStorage.settings.first()
-                when (settings.tileTapBehavior) {
+                val currentSettings = settings ?: container.settingsStorage.settings.first()
+                when (currentSettings.tileTapBehavior) {
                     TileInteractionBehavior.SHOW_DIALOG ->
                         withContext(Dispatchers.Main) { launchDialogAndCollapse() }
                     TileInteractionBehavior.OPEN_APP ->
@@ -188,14 +195,17 @@ class PerformanceTileService : TileService() {
                 }
             }.onFailure { throwable ->
                 Log.e(TAG, "Failed to handle tile tap", throwable)
-                showToast(throwable.message ?: "Failed to handle tile tap")
+                val strings = resolvePulseStrings(settings?.appLanguage ?: AppLanguage.SYSTEM)
+                showToast(throwable.message ?: strings.toastTileFailed)
             }
         }
     }
 
     private suspend fun cycleTierAndUpdate(container: AppContainer) {
         val tierCycle = listOf(PowerTier.MAX, PowerTier.BALANCED, PowerTier.POWER_SAVING, PowerTier.CUSTOM)
-        val currentLabel = container.settingsStorage.settings.first().activeTierLabel
+        val settings = container.settingsStorage.settings.first()
+        val strings = resolvePulseStrings(settings.appLanguage)
+        val currentLabel = settings.activeTierLabel
         val currentIndex = tierCycle.indexOfFirst { it.label == currentLabel }
         val nextTier = if (currentIndex == -1) tierCycle.first()
                        else tierCycle[(currentIndex + 1) % tierCycle.size]
@@ -205,16 +215,30 @@ class PerformanceTileService : TileService() {
             container.settingsStorage.persistActiveTierLabel(PowerTier.CUSTOM.label)
             val restored = container.repository.restoreCustomValues()
             updateTileToActive(container)
-            showToast(if (restored.isSuccess) "Applied Custom" else "Custom — adjust in app")
+            showToast(if (restored.isSuccess) strings.toastAppliedManual else strings.toastCustomAdjustInApp)
         } else {
             container.repository.applyTier(nextTier)
                 .onSuccess {
                     container.settingsStorage.persistActiveTierLabel(nextTier.label)
                     updateTileToActive(container)
-                    showToast("Applied ${nextTier.label}")
+                    showToast(String.format(strings.toastAppliedTier, nextTier.localizedLabel(strings)))
                 }
                 .onFailure { throwable ->
-                    showToast(throwable.message ?: "Failed to cycle tier")
+                    val errorMsg = when {
+                        throwable.message?.contains("PServer not available") == true -> strings.errorPserverUnavailable
+                        throwable.message?.contains("No CPU clusters found") == true -> strings.errorNoCpuClusters
+                        throwable.message?.contains("No saved Custom configuration") == true -> strings.errorNoCustomConfig
+                        throwable.message?.contains("No GPU policy found") == true -> strings.errorNoGpuPolicy
+                        throwable.message?.contains("Profile is unavailable") == true -> strings.errorProfileUnavailable
+                        throwable.message?.contains("Sleep profile is unavailable") == true -> strings.errorSleepProfileUnavailable
+                        throwable.message?.contains("No sleep restore state") == true -> strings.errorNoSleepRestoreState
+                        throwable.message?.contains("No stored values to apply") == true -> strings.errorNoStoredValues
+                        throwable.message?.contains("No stored values match detected policies") == true -> strings.errorNoStoredValuesMatch
+                        throwable.message?.contains("Tile controls are unavailable") == true -> strings.errorTileUnavailable
+                        throwable.message?.contains("No profiles available for tile cycling") == true -> strings.errorNoProfilesForCycling
+                        else -> throwable.message
+                    }
+                    showToast(errorMsg ?: String.format(strings.toastFailedToApply, nextTier.localizedLabel(strings)))
                 }
         }
     }

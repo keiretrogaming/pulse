@@ -24,6 +24,9 @@ import androidx.core.content.getSystemService
 import com.kei.pulse.AppContainer
 import com.kei.pulse.MainActivity
 import com.kei.pulse.R
+import com.kei.pulse.i18n.AppLanguage
+import com.kei.pulse.i18n.PulseStrings
+import com.kei.pulse.i18n.resolvePulseStrings
 import com.kei.pulse.data.AutoTuneController
 import com.kei.pulse.data.FanController
 import com.kei.pulse.data.FanCurveController
@@ -583,11 +586,12 @@ class ForegroundAppMonitorService : Service() {
             serviceScope.launch {
                 overlayLocked = !overlayLocked
                 val settings = container.settingsStorage.settings.first()
+                val strings = currentStrings()
                 overlay.setConfig(
                     OverlayConfig(settings.overlayPreset, settings.overlayOpacity, overlayLocked, settings.overlayElements),
                 )
                 updateNotification(
-                    if (overlayLocked) "Overlay locked" else "Overlay unlocked — drag to reposition",
+                    if (overlayLocked) strings.notifyOverlayLocked else strings.notifyOverlayUnlocked,
                 )
             }
             return START_STICKY
@@ -969,7 +973,8 @@ class ForegroundAppMonitorService : Service() {
                 fanController.setMode(action.mode)
                 if (!fanOverrideNotified && container.perAppConfigStorage.switchNotices.first()) {
                     fanOverrideNotified = true
-                    showToast("PULSE · system Fan tile changed the fan — re-applied ${FanController.labelFor(action.mode)}")
+                    val strings = currentStrings()
+                    showToast(String.format(strings.toastFanReapplied, fanLabel(action.mode, strings)))
                 }
             }
             is FanAction.ReleaseToVendor -> {
@@ -1228,7 +1233,8 @@ class ForegroundAppMonitorService : Service() {
             onLockToggled = { locked ->
                 overlayLocked = locked
                 serviceScope.launch {
-                    updateNotification(if (locked) "Overlay locked" else "Overlay unlocked — drag to reposition")
+                    val strings = currentStrings()
+                    updateNotification(if (locked) strings.notifyOverlayLocked else strings.notifyOverlayUnlocked)
                 }
             },
         )
@@ -1852,6 +1858,7 @@ class ForegroundAppMonitorService : Service() {
     }
 
     private suspend fun applyConfig(config: PerAppConfig) {
+        val strings = currentStrings()
         val parts = mutableListOf<String>()
         val tier = PerAppConfig.tierFromBinding(config.profileBinding)
         when {
@@ -1866,13 +1873,13 @@ class ForegroundAppMonitorService : Service() {
                             governorController.setGovernor(policies, option)
                         }
                     }
-                    parts += tier.label
+                    parts += tier.localizedLabel(strings)
                 }
             }
             tier != null -> {
                 container.repository.applyTier(tier).onSuccess {
                     container.settingsStorage.persistActiveTierLabel(tier.label)
-                    parts += tier.label
+                    parts += tier.localizedLabel(strings)
                 }
             }
             // AUTO_OFF is an explicit "no AutoTDP" sentinel, not a saved-profile id — skip the profile apply
@@ -1880,12 +1887,12 @@ class ForegroundAppMonitorService : Service() {
             config.profileBinding != null && !PerAppConfig.isAutoOff(config.profileBinding) ->
                 container.repository.applyDisplayProfileById(config.profileBinding).onSuccess {
                     parts += container.repository.observeState().first().displayProfiles
-                        .firstOrNull { it.id == config.profileBinding }?.name ?: "Saved profile"
+                        .firstOrNull { it.id == config.profileBinding }?.name ?: strings.savedProfileStr
                 }
         }
         config.fanMode?.let { mode ->
             fanController.setMode(mode)
-            parts += "Fan ${FanController.labelFor(mode)}"
+            parts += "${strings.fanModeLabel} ${fanLabel(mode, strings)}"
         }
         config.refreshRateHz?.let { hz ->
             refreshRateController.setRate(hz)
@@ -1938,9 +1945,26 @@ class ForegroundAppMonitorService : Service() {
         restore.governor?.let { governorController.setGovernorRaw(ensurePolicies(), it) }
         container.perAppConfigStorage.persistRestoreState(null)
         if (notify && container.perAppConfigStorage.switchNotices.first()) {
-            showToast("PULSE · previous settings restored")
-            updateNotification("Previous settings restored")
+            val strings = currentStrings()
+            showToast(strings.toastSettingsRestored)
+            updateNotification(strings.toastSettingsRestored)
         }
+    }
+
+    private fun currentStrings(): PulseStrings {
+        val lang = runCatching {
+            kotlinx.coroutines.runBlocking { container.settingsStorage.settings.first().appLanguage }
+        }.getOrDefault(AppLanguage.ZH_TW)
+        return resolvePulseStrings(lang)
+    }
+
+    private fun fanLabel(mode: Int?, strings: PulseStrings): String = when (mode) {
+        FanController.SILENT -> strings.fanModeQuiet
+        FanController.SMART -> strings.fanModeSmart
+        FanController.SPORT -> strings.fanModeMax
+        FanController.CUSTOM -> strings.fanModeCustom
+        null -> "—"
+        else -> "${strings.qaModePrefix} $mode"
     }
 
     private fun showToast(message: String) {
@@ -1954,24 +1978,26 @@ class ForegroundAppMonitorService : Service() {
     }
 
     private fun createNotificationChannel() {
+        val strings = currentStrings()
         val channel = NotificationChannel(
             CHANNEL_ID,
-            "Per-app profile monitoring",
+            strings.notifyPerAppTitle,
             NotificationManager.IMPORTANCE_LOW,
         ).apply {
             setShowBadge(false)
-            description = "Keeps PULSE ready to switch profiles when configured apps launch."
+            description = strings.notifyWatchingApps
         }
         getSystemService<NotificationManager>()?.createNotificationChannel(channel)
     }
 
     private fun buildNotification(
-        contentText: String = "Watching for configured apps to apply their profiles.",
-    ) =
-        NotificationCompat.Builder(this, CHANNEL_ID)
+        contentText: String? = null,
+    ): android.app.Notification {
+        val strings = currentStrings()
+        return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_tile_underclock)
-            .setContentTitle("PULSE per-app profiles")
-            .setContentText(contentText)
+            .setContentTitle(strings.notifyPerAppTitle)
+            .setContentText(contentText ?: strings.notifyWatchingApps)
             .setOngoing(true)
             .setShowWhen(false)
             .setPriority(NotificationCompat.PRIORITY_LOW)
@@ -1988,7 +2014,7 @@ class ForegroundAppMonitorService : Service() {
             .addAction(
                 NotificationCompat.Action.Builder(
                     R.drawable.ic_tile_underclock,
-                    "Move overlay",
+                    strings.notifyMoveOverlay,
                     PendingIntent.getService(
                         this,
                         1,
@@ -1999,6 +2025,7 @@ class ForegroundAppMonitorService : Service() {
                 ).build(),
             )
             .build()
+    }
 
     companion object {
         private const val CHANNEL_ID = "per_app_profile_monitoring"

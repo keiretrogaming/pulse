@@ -17,6 +17,9 @@ import androidx.core.content.getSystemService
 import com.kei.pulse.AppContainer
 import com.kei.pulse.MainActivity
 import com.kei.pulse.R
+import com.kei.pulse.i18n.AppLanguage
+import com.kei.pulse.i18n.PulseStrings
+import com.kei.pulse.i18n.resolvePulseStrings
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -116,23 +119,32 @@ class SleepProfileMonitorService : Service() {
         }
     }
 
+    private fun currentStrings(): PulseStrings {
+        val lang = runCatching {
+            kotlinx.coroutines.runBlocking { container.settingsStorage.settings.first().appLanguage }
+        }.getOrDefault(AppLanguage.ZH_TW)
+        return resolvePulseStrings(lang)
+    }
+
     private fun createNotificationChannel() {
+        val strings = currentStrings()
         val channel = NotificationChannel(
             CHANNEL_ID,
-            "Sleep profile monitoring",
+            strings.notifySleepChannelName,
             NotificationManager.IMPORTANCE_LOW,
         ).apply {
             setShowBadge(false)
-            description = "Keeps PULSE ready to apply and restore the sleep profile."
+            description = strings.notifySleepChannelDesc
         }
         getSystemService<NotificationManager>()?.createNotificationChannel(channel)
     }
 
-    private fun buildNotification() =
-        NotificationCompat.Builder(this, CHANNEL_ID)
+    private fun buildNotification(): android.app.Notification {
+        val strings = currentStrings()
+        return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_tile_underclock)
-            .setContentTitle("PULSE sleep profile")
-            .setContentText("Monitoring sleep and wake to restore CPU limits.")
+            .setContentTitle(strings.notifySleepTitle)
+            .setContentText(strings.notifySleepContent)
             .setOngoing(true)
             .setShowWhen(false)
             .setPriority(NotificationCompat.PRIORITY_LOW)
@@ -145,6 +157,7 @@ class SleepProfileMonitorService : Service() {
                 ),
             )
             .build()
+    }
 
     companion object {
         private const val CHANNEL_ID = "sleep_profile_monitoring"

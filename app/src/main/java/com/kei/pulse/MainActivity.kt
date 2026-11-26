@@ -28,6 +28,9 @@ import com.kei.pulse.sleep.SleepProfileMonitorService
 import com.kei.pulse.tile.QuickSettingsTileAddResult
 import com.kei.pulse.tile.QuickSettingsTilePrompt
 import com.kei.pulse.tile.QuickSettingsTileRefresher
+import com.kei.pulse.i18n.LocaleHelper
+import com.kei.pulse.i18n.PulseStrings
+import com.kei.pulse.i18n.resolvePulseStrings
 import com.kei.pulse.ui.FanCurveEditorBindings
 import com.kei.pulse.ui.MainTunerScreen
 import com.kei.pulse.ui.PerAppScreen
@@ -36,7 +39,9 @@ import com.kei.pulse.ui.TunerViewModel
 import com.kei.pulse.ui.theme.LocalThermalHeat
 import com.kei.pulse.ui.theme.PulseTheme
 import com.kei.pulse.ui.theme.heatForTier
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -84,6 +89,12 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         maybeRequestQuickSettingsTileOnFirstRun()
         maybePromptBatteryExemption()
+
+        lifecycleScope.launch {
+            viewModel.settings.map { it.appLanguage }.distinctUntilChanged().collect { lang ->
+                LocaleHelper.applyLanguage(this@MainActivity, lang)
+            }
+        }
 
         setContent {
             val settings = viewModel.settings.collectAsStateWithLifecycle().value
@@ -156,6 +167,7 @@ class MainActivity : ComponentActivity() {
                             onColorSourceChange = viewModel::setColorSource,
                             onThemeChange = viewModel::setThemeId,
                             onAccentColorChange = viewModel::setAccentColor,
+                            onAppLanguageChange = viewModel::setAppLanguage,
                             onTileTapBehaviorChange = { behavior ->
                                 viewModel.setTileTapBehavior(behavior) {
                                     QuickSettingsTileRefresher.requestUpdate(this@MainActivity)
@@ -308,15 +320,18 @@ class MainActivity : ComponentActivity() {
     // Set when AutoTDP (global default) is flipped on without Usage access — same bounce/return flow.
     private var pendingAutoTdpEnable = false
 
+    private fun currentStrings(): PulseStrings = resolvePulseStrings(viewModel.settings.value.appLanguage)
+
     override fun onResume() {
         super.onResume()
         // PULSE's UI is on screen — the OSD must never draw over it (a focused text field makes the foreground
         // probe report the keyboard's package, which used to leak the OSD over our own settings).
         ForegroundAppMonitorService.uiInForeground = true
+        val strings = currentStrings()
         if (pendingPerAppEnable) {
             pendingPerAppEnable = false
             if (ForegroundAppMonitorService.hasUsageAccess(this)) {
-                Toast.makeText(applicationContext, "Per-app profiles enabled", Toast.LENGTH_SHORT).show()
+                Toast.makeText(applicationContext, strings.toastPerAppEnabled, Toast.LENGTH_SHORT).show()
                 enablePerAppProfiles()
             }
         }
@@ -325,14 +340,14 @@ class MainActivity : ComponentActivity() {
             if (PerformanceOverlay.hasPermission(this)) {
                 if (ForegroundAppMonitorService.hasUsageAccess(this)) {
                     enableOverlay()
-                    Toast.makeText(applicationContext, "Overlay enabled", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(applicationContext, strings.toastOverlayEnabled, Toast.LENGTH_SHORT).show()
                 } else {
                     // Overlay permission is in; the OSD also needs Usage access to know the foreground app.
                     pendingOverlayEnable = true
                     startActivity(android.content.Intent(android.provider.Settings.ACTION_USAGE_ACCESS_SETTINGS))
                     Toast.makeText(
                         applicationContext,
-                        "The overlay needs Usage access to know which game is on screen. Allow it for PULSE, then come back.",
+                        strings.toastPermissionUsage,
                         Toast.LENGTH_LONG,
                     ).show()
                 }
@@ -343,13 +358,13 @@ class MainActivity : ComponentActivity() {
             if (PerformanceOverlay.hasPermission(this)) {
                 if (ForegroundAppMonitorService.hasUsageAccess(this)) {
                     enableQuickAccess()
-                    Toast.makeText(applicationContext, "Quick Access bar enabled", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(applicationContext, strings.toastQuickAccessEnabled, Toast.LENGTH_SHORT).show()
                 } else {
                     pendingQuickAccessEnable = true
                     startActivity(android.content.Intent(android.provider.Settings.ACTION_USAGE_ACCESS_SETTINGS))
                     Toast.makeText(
                         applicationContext,
-                        "The Quick Access bar needs Usage access to know which game is on screen. Allow it for PULSE, then come back.",
+                        strings.toastPermissionUsage,
                         Toast.LENGTH_LONG,
                     ).show()
                 }
@@ -358,7 +373,7 @@ class MainActivity : ComponentActivity() {
         if (pendingAutoTdpEnable) {
             pendingAutoTdpEnable = false
             if (ForegroundAppMonitorService.hasUsageAccess(this)) {
-                Toast.makeText(applicationContext, "AutoTDP enabled", Toast.LENGTH_SHORT).show()
+                Toast.makeText(applicationContext, strings.toastAutoTdpEnabled, Toast.LENGTH_SHORT).show()
                 enableAutoTdpDefault()
             }
         }
@@ -381,7 +396,7 @@ class MainActivity : ComponentActivity() {
             startActivity(android.content.Intent(android.provider.Settings.ACTION_USAGE_ACCESS_SETTINGS))
             Toast.makeText(
                 applicationContext,
-                "AutoTDP needs Usage access to see which game is running. Allow it for PULSE, then come back.",
+                currentStrings().toastPermissionUsage,
                 Toast.LENGTH_LONG,
             ).show()
             return
@@ -411,7 +426,7 @@ class MainActivity : ComponentActivity() {
             )
             Toast.makeText(
                 applicationContext,
-                "Allow \"Display over other apps\" for PULSE, then come back",
+                currentStrings().toastPermissionOverlay,
                 Toast.LENGTH_LONG,
             ).show()
             return
@@ -423,7 +438,7 @@ class MainActivity : ComponentActivity() {
             startActivity(android.content.Intent(android.provider.Settings.ACTION_USAGE_ACCESS_SETTINGS))
             Toast.makeText(
                 applicationContext,
-                "The overlay needs Usage access to know which game is on screen. Allow it for PULSE, then come back.",
+                currentStrings().toastPermissionUsage,
                 Toast.LENGTH_LONG,
             ).show()
             return
@@ -532,7 +547,7 @@ class MainActivity : ComponentActivity() {
             )
             Toast.makeText(
                 applicationContext,
-                "Allow \"Display over other apps\" for PULSE, then come back",
+                currentStrings().toastPermissionOverlay,
                 Toast.LENGTH_LONG,
             ).show()
             return
@@ -542,7 +557,7 @@ class MainActivity : ComponentActivity() {
             startActivity(android.content.Intent(android.provider.Settings.ACTION_USAGE_ACCESS_SETTINGS))
             Toast.makeText(
                 applicationContext,
-                "The Quick Access bar needs Usage access to know which game is on screen. Allow it for PULSE, then come back.",
+                currentStrings().toastPermissionUsage,
                 Toast.LENGTH_LONG,
             ).show()
             return
@@ -569,7 +584,7 @@ class MainActivity : ComponentActivity() {
             startActivity(android.content.Intent(android.provider.Settings.ACTION_USAGE_ACCESS_SETTINGS))
             Toast.makeText(
                 applicationContext,
-                "Per-app profiles need Usage access to detect the foreground app. Allow it for PULSE, then come back.",
+                currentStrings().toastPermissionUsage,
                 Toast.LENGTH_LONG,
             ).show()
             return
@@ -605,7 +620,7 @@ class MainActivity : ComponentActivity() {
                 startActivity(android.content.Intent(android.provider.Settings.ACTION_USAGE_ACCESS_SETTINGS))
                 Toast.makeText(
                     applicationContext,
-                    "Per-app profiles need Usage access to detect the foreground app — allow it for PULSE.",
+                    currentStrings().toastPermissionUsage,
                     Toast.LENGTH_LONG,
                 ).show()
             }
@@ -676,9 +691,10 @@ class MainActivity : ComponentActivity() {
                 }
             }
             if (!showResultToast) return@request
+            val strings = currentStrings()
             Toast.makeText(
                 applicationContext,
-                result.toToastMessage(),
+                result.toToastMessage(strings),
                 Toast.LENGTH_SHORT,
             ).show()
         }
@@ -692,11 +708,11 @@ class MainActivity : ComponentActivity() {
                     outputStream.write(json.toByteArray())
                 } ?: error("Unable to open export file")
             }.onSuccess {
-                Toast.makeText(applicationContext, "Exported profiles", Toast.LENGTH_SHORT).show()
+                Toast.makeText(applicationContext, currentStrings().toastExportSuccess, Toast.LENGTH_SHORT).show()
             }.onFailure { throwable ->
                 Toast.makeText(
                     applicationContext,
-                    throwable.message ?: "Failed to export profiles",
+                    throwable.message ?: currentStrings().toastExportFailed,
                     Toast.LENGTH_LONG,
                 ).show()
             }
@@ -712,26 +728,26 @@ class MainActivity : ComponentActivity() {
             }.onSuccess { importedCount ->
                 Toast.makeText(
                     applicationContext,
-                    "Imported $importedCount profiles",
+                    String.format(currentStrings().toastProfilesImportCount, importedCount),
                     Toast.LENGTH_SHORT,
                 ).show()
             }.onFailure { throwable ->
                 Toast.makeText(
                     applicationContext,
-                    throwable.message ?: "Failed to import profiles",
+                    throwable.message ?: currentStrings().toastImportFailed,
                     Toast.LENGTH_LONG,
                 ).show()
             }
         }
     }
 
-    private fun QuickSettingsTileAddResult.toToastMessage(): String {
+    private fun QuickSettingsTileAddResult.toToastMessage(strings: PulseStrings): String {
         return when (this) {
-            QuickSettingsTileAddResult.ADDED -> "Quick Settings tile added"
-            QuickSettingsTileAddResult.ALREADY_ADDED -> "Quick Settings tile is already added"
-            QuickSettingsTileAddResult.NOT_ADDED -> "Quick Settings tile was not added"
-            QuickSettingsTileAddResult.UNAVAILABLE -> "Quick Settings tile prompt is unavailable on this device"
-            QuickSettingsTileAddResult.ERROR -> "Failed to request Quick Settings tile"
+            QuickSettingsTileAddResult.ADDED -> strings.toastTileAdded
+            QuickSettingsTileAddResult.ALREADY_ADDED -> strings.toastTileAlreadyAdded
+            QuickSettingsTileAddResult.NOT_ADDED -> strings.toastTileNotAdded
+            QuickSettingsTileAddResult.UNAVAILABLE -> strings.toastTileUnavailable
+            QuickSettingsTileAddResult.ERROR -> strings.toastTileFailed
         }
     }
 }

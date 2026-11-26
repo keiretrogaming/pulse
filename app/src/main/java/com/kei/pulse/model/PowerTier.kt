@@ -1,5 +1,7 @@
 package com.kei.pulse.model
 
+import com.kei.pulse.i18n.PulseStrings
+
 /**
  * The four PULSE performance tiers. On Snapdragon there is no programmable wattage cap
  * (unlike x86 AYANEO/AYASPACE), so each tier is a *power envelope* implemented by capping
@@ -22,5 +24,19 @@ enum class PowerTier(
     MAX("AAA / Max", "Full SoC ceiling", 1.0, 1.0, "Performance"),
     BALANCED("Balanced", "Cooler, long sessions", 0.78, 0.70, "Balanced"),
     POWER_SAVING("Power Saving", "Max battery life", 0.55, 0.45, "Power Save"),
-    CUSTOM("Custom", "Your own limits", 1.0, 1.0, null),
+    CUSTOM("Custom", "Your own limits", 1.0, 1.0, null);
+
+    fun localizedLabel(strings: PulseStrings): String = when (this) {
+        MAX -> strings.tierMaxLabel
+        BALANCED -> strings.tierBalancedLabel
+        POWER_SAVING -> strings.tierPowerSavingLabel
+        CUSTOM -> strings.tierCustomLabel
+    }
+
+    fun localizedTagline(strings: PulseStrings): String = when (this) {
+        MAX -> strings.tierMaxTagline
+        BALANCED -> strings.tierBalancedTagline
+        POWER_SAVING -> strings.tierPowerSavingTagline
+        CUSTOM -> strings.tierCustomTagline
+    }
 }

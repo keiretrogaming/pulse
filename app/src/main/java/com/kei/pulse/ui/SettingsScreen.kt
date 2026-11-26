@@ -63,6 +63,9 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.kei.pulse.i18n.AppLanguage
+import com.kei.pulse.i18n.LocalPulseStrings
+import com.kei.pulse.i18n.localizedName
 import com.kei.pulse.model.AppColorSource
 import com.kei.pulse.model.OverlayElement
 import com.kei.pulse.model.OverlayPreset
@@ -95,6 +98,7 @@ fun SettingsScreen(
     onColorSourceChange: (AppColorSource) -> Unit,
     onThemeChange: (PulseThemeId) -> Unit,
     onAccentColorChange: (Int) -> Unit,
+    onAppLanguageChange: (AppLanguage) -> Unit = {},
     onTileTapBehaviorChange: (TileInteractionBehavior) -> Unit,
     onApplyLastProfileOnBootChange: (Boolean) -> Unit,
     sleepProfileOptions: List<PerformanceProfile>,
@@ -126,6 +130,7 @@ fun SettingsScreen(
     onClearQuickAccessCombo: () -> Unit = {},
     capturingCombo: Boolean = false,
 ) {
+    val strings = LocalPulseStrings.current
     var showResetConfirmation by remember { mutableStateOf(false) }
 
     HudBackground(modifier = Modifier.fillMaxSize()) {
@@ -144,27 +149,31 @@ fun SettingsScreen(
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
-                    text = "Settings",
+                    text = strings.settingsTitle,
                     style = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.Bold,
                 )
                 Text(
-                    text = "P.U.L.S.E.",
+                    text = strings.appName,
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.primary,
                 )
                 Text(
-                    text = "Performance Utility for Load and System Efficiency",
+                    text = strings.appTagline,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             TextButton(onClick = onBack) {
-                Text("Done")
+                Text(strings.done)
             }
         }
 
-        SettingsSection(title = "PULSE") {
+        SettingsSection(title = strings.languageSectionTitle) {
+            LanguageSelector(selected = settings.appLanguage, onSelect = onAppLanguageChange)
+        }
+
+        SettingsSection(title = strings.pulseSectionTitle) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -175,14 +184,12 @@ fun SettingsScreen(
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     Text(
-                        text = if (settings.pulseEnabled) "PULSE is active" else "System in control",
+                        text = if (settings.pulseEnabled) strings.pulseActive else strings.pulseSystemControl,
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold,
                     )
                     Text(
-                        text = "Master switch. Turn OFF to hand every control back to manufacturer stock — " +
-                            "uncapped clocks, Smart fan, restored governor/refresh — and fully stop PULSE. " +
-                            "Do this before uninstalling for a clean device.",
+                        text = strings.masterSwitchDesc,
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 }
@@ -193,18 +200,18 @@ fun SettingsScreen(
             }
         }
 
-        SettingsSection(title = "Appearance") {
+        SettingsSection(title = strings.appearanceTitle) {
             ThemeSelector(selected = settings.themeId, onSelect = onThemeChange)
         }
 
-        SettingsSection(title = "Quick Settings Tile") {
+        SettingsSection(title = strings.quickSettingsTitle) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = "Add PULSE to Quick Settings",
+                    text = strings.addPulseToQs,
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                 )
@@ -214,14 +221,14 @@ fun SettingsScreen(
                 ) {
                     Text(
                         when {
-                            isQuickSettingsTileAdded -> "Tile already added"
-                            canRequestAddQuickSettingsTile -> "Add tile"
-                            else -> "Unavailable"
+                            isQuickSettingsTileAdded -> strings.tileAlreadyAdded
+                            canRequestAddQuickSettingsTile -> strings.addTile
+                            else -> strings.unavailable
                         },
                     )
                 }
             }
-            SettingsControlGroup(label = "Single tap") {
+            SettingsControlGroup(label = strings.singleTapLabel) {
                 TileBehaviorSelector(
                     selected = settings.tileTapBehavior,
                     onChange = onTileTapBehaviorChange,
@@ -229,7 +236,7 @@ fun SettingsScreen(
             }
         }
 
-        SettingsSection(title = "Startup") {
+        SettingsSection(title = strings.startupTitle) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -240,12 +247,12 @@ fun SettingsScreen(
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     Text(
-                        text = "Apply last profile on device boot",
+                        text = strings.applyBootProfile,
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold,
                     )
                     Text(
-                        text = "When enabled, the app will attempt to restore the last applied profile after boot.",
+                        text = strings.applyBootProfileDesc,
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 }
@@ -256,7 +263,7 @@ fun SettingsScreen(
             }
         }
 
-        SettingsSection(title = "Sleep") {
+        SettingsSection(title = strings.sleepProfileTitle) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -267,12 +274,12 @@ fun SettingsScreen(
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     Text(
-                        text = "Apply sleep profile",
+                        text = strings.sleepProfileSwitch,
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold,
                     )
                     Text(
-                        text = "When enabled, PULSE keeps a low-priority notification so it can apply this profile when the screen turns off and restore the previous limits when the device wakes.",
+                        text = strings.sleepProfileSwitchDesc,
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 }
@@ -284,11 +291,11 @@ fun SettingsScreen(
             }
             if (sleepProfileOptions.isEmpty()) {
                 Text(
-                    text = "No profiles are available yet.",
+                    text = strings.sleepProfileNone,
                     style = MaterialTheme.typography.bodyMedium,
                 )
             } else {
-                SettingsControlGroup(label = "Profile while asleep") {
+                SettingsControlGroup(label = strings.sleepProfileSelect) {
                     SleepProfileSelector(
                         profiles = sleepProfileOptions,
                         selectedProfileId = settings.sleepProfileId,
@@ -299,7 +306,7 @@ fun SettingsScreen(
             }
         }
 
-        SettingsSection(title = "Per-app profiles") {
+        SettingsSection(title = strings.perAppSectionTitle) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -310,12 +317,12 @@ fun SettingsScreen(
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     Text(
-                        text = "Switch profiles per app",
+                        text = strings.perAppSwitch,
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold,
                     )
                     Text(
-                        text = "Applies an app's bound profile and extras when it launches, and restores the previous state when it exits. Needs the Usage access permission.",
+                        text = strings.perAppSwitchDesc,
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 }
@@ -339,7 +346,7 @@ fun SettingsScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 TextButton(onClick = onOpenPerApps) {
-                    Text("Configure apps")
+                    Text(strings.perAppConfigureButton)
                 }
             }
             Row(
@@ -352,12 +359,12 @@ fun SettingsScreen(
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     Text(
-                        text = "Switch notifications",
+                        text = strings.perAppSwitchNotices,
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold,
                     )
                     Text(
-                        text = "Show a toast and status notification when a per-app profile applies or restores.",
+                        text = strings.perAppSwitchNoticesDesc,
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 }
@@ -368,7 +375,7 @@ fun SettingsScreen(
             }
         }
 
-        SettingsSection(title = "On-screen overlay") {
+        SettingsSection(title = strings.overlaySectionTitle) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -379,12 +386,12 @@ fun SettingsScreen(
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     Text(
-                        text = "Show in-game overlay",
+                        text = strings.inGameOverlaySwitch,
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold,
                     )
                     Text(
-                        text = "Floats live FPS, clocks, temps, power and battery time-left over apps you've configured in Per-app profiles. Needs the \"Display over other apps\" permission. While unlocked, drag to reposition and tap LAYOUT to switch density; the notification's \"Move overlay\" action toggles the lock during play.",
+                        text = strings.inGameOverlayDesc,
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 }
@@ -403,13 +410,12 @@ fun SettingsScreen(
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     Text(
-                        text = "Quick Access bar",
+                        text = strings.quickAccessSwitch,
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold,
                     )
                     Text(
-                        text = "Adjust performance, fan, and lighting without leaving your game. Open the panel " +
-                            "with the edge handle or your controller shortcut — changes apply instantly.",
+                        text = strings.quickAccessDesc,
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 }
@@ -429,11 +435,11 @@ fun SettingsScreen(
                         verticalArrangement = Arrangement.spacedBy(2.dp),
                     ) {
                         Text(
-                            text = "Edge handle",
+                            text = strings.quickAccessHandleSwitch,
                             style = MaterialTheme.typography.bodyMedium,
                         )
                         Text(
-                            text = "Show a small tab on the screen edge that opens the panel.",
+                            text = strings.quickAccessHandleDesc,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -445,7 +451,7 @@ fun SettingsScreen(
                 }
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
-                        text = "Controller shortcut: " +
+                        text = "${strings.quickAccessComboLabel}: " +
                             com.kei.pulse.data.InputComboParser.displayName(
                                 com.kei.pulse.data.InputComboParser.decode(settings.quickAccessCombo),
                             ),
@@ -454,37 +460,36 @@ fun SettingsScreen(
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (capturingCombo) {
                             Text(
-                                text = "Hold the buttons on your controller…",
+                                text = strings.pressComboPrompt,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.align(Alignment.CenterVertically),
                             )
                         } else {
-                            TextButton(onClick = onSetQuickAccessCombo) { Text("Set shortcut") }
-                            TextButton(onClick = onClearQuickAccessCombo) { Text("Clear") }
+                            TextButton(onClick = onSetQuickAccessCombo) { Text(strings.setComboButton) }
+                            TextButton(onClick = onClearQuickAccessCombo) { Text(strings.clearComboButton) }
                         }
                     }
                 }
             }
-            SettingsControlGroup(label = "Layout · density + quick-fill") {
+            SettingsControlGroup(label = strings.overlayPresetLabel) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OverlayPreset.entries.forEach { preset ->
                         FilterChip(
                             selected = overlayPreset == preset,
                             onClick = { onOverlayPresetChange(preset) },
-                            label = { Text(preset.label) },
+                            label = { Text(preset.localizedLabel(strings)) },
                         )
                     }
                 }
             }
-            SettingsControlGroup(label = "Shown items") {
+            SettingsControlGroup(label = strings.overlayElementsLabel) {
                 Text(
-                    text = "Tap to add or remove. Grouped by what it measures; a few items only render in the " +
-                        "Detailed/Full layouts (core bars, chip name, FPS trend).",
+                    text = strings.overlayElementsHelpText,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                OverlayItemGroups.forEach { group ->
+                getOverlayItemGroups(strings).forEach { group ->
                     OverlayItemGroup(
                         title = group.title,
                         items = group.items,
@@ -493,7 +498,7 @@ fun SettingsScreen(
                     )
                 }
             }
-            SettingsControlGroup(label = "Opacity · $overlayOpacity%") {
+            SettingsControlGroup(label = "${strings.overlayOpacityLabel} · $overlayOpacity%") {
                 Slider(
                     value = overlayOpacity.toFloat(),
                     onValueChange = { onOverlayOpacityChange(it.roundToInt()) },
@@ -502,10 +507,9 @@ fun SettingsScreen(
             }
         }
 
-        SettingsSection(title = "Joystick RGB") {
+        SettingsSection(title = strings.rgbSectionTitle) {
             Text(
-                text = "Color the controller's joystick LEDs. Battery and Heat glow with device status; " +
-                    "Manual sets your own color per stick. Turn the lights on in your system settings to see them.",
+                text = strings.rgbHelpText,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -514,7 +518,7 @@ fun SettingsScreen(
                     FilterChip(
                         selected = settings.rgbMode == mode,
                         onClick = { onRgbModeChange(mode) },
-                        label = { Text(mode.label) },
+                        label = { Text(mode.localizedLabel(strings)) },
                     )
                 }
             }
@@ -527,7 +531,7 @@ fun SettingsScreen(
             }
         }
 
-        SettingsSection(title = "Profiles") {
+        SettingsSection(title = strings.backupSectionTitle) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -538,12 +542,12 @@ fun SettingsScreen(
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     Text(
-                        text = "Share profiles",
+                        text = strings.exportProfilesTitle,
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold,
                     )
                     Text(
-                        text = "Export profiles to JSON or import a shared profile file.",
+                        text = strings.exportProfilesDesc,
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 }
@@ -552,10 +556,10 @@ fun SettingsScreen(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     TextButton(onClick = onImportProfiles) {
-                        Text("Import")
+                        Text(strings.importStr)
                     }
                     TextButton(onClick = onExportProfiles) {
-                        Text("Export")
+                        Text(strings.export)
                     }
                 }
             }
@@ -570,34 +574,34 @@ fun SettingsScreen(
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     Text(
-                        text = "Reset profiles to default",
+                        text = strings.resetProfilesTitle,
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold,
                     )
                     Text(
-                        text = "Bundled profiles are restored and custom profiles are removed.",
+                        text = strings.resetProfilesDesc,
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 }
                 TextButton(onClick = { showResetConfirmation = true }) {
-                    Text("Reset")
+                    Text(strings.reset)
                 }
             }
         }
-        SettingsSection(title = "About") {
+        SettingsSection(title = strings.aboutSectionTitle) {
             Text(
-                text = "P.U.L.S.E.",
+                text = strings.appName,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.primary,
             )
             Text(
-                text = "Performance Utility for Load and System Efficiency",
+                text = strings.appTagline,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
-                text = "No-root CPU + GPU control for AYN Odin 3, AYN Thor and Retroid Pocket 6.",
+                text = strings.aboutDescription,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -608,9 +612,9 @@ fun SettingsScreen(
     if (showResetConfirmation) {
         AlertDialog(
             onDismissRequest = { showResetConfirmation = false },
-            title = { Text("Reset profiles?") },
+            title = { Text(strings.resetProfilesConfirmTitle) },
             text = {
-                Text("This removes custom profiles and restores the bundled defaults.")
+                Text(strings.resetProfilesConfirmMsg)
             },
             confirmButton = {
                 TextButton(
@@ -619,12 +623,12 @@ fun SettingsScreen(
                         onResetProfiles()
                     },
                 ) {
-                    Text("Reset")
+                    Text(strings.reset)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showResetConfirmation = false }) {
-                    Text("Cancel")
+                    Text(strings.cancel)
                 }
             },
         )
@@ -639,6 +643,7 @@ private fun SleepProfileSelector(
     enabled: Boolean,
     onChange: (String?) -> Unit,
 ) {
+    val strings = LocalPulseStrings.current
     var expanded by remember { mutableStateOf(false) }
     val selectedProfile = profiles.firstOrNull { profile -> profile.id == selectedProfileId }
 
@@ -647,7 +652,7 @@ private fun SleepProfileSelector(
         onExpandedChange = { if (enabled) expanded = !expanded },
     ) {
         OutlinedTextField(
-            value = selectedProfile?.name ?: "Select profile",
+            value = selectedProfile?.localizedName(strings) ?: strings.selectProfile,
             onValueChange = {},
             readOnly = true,
             enabled = enabled,
@@ -666,7 +671,7 @@ private fun SleepProfileSelector(
         ) {
             profiles.forEach { profile ->
                 DropdownMenuItem(
-                    text = { Text(profile.name) },
+                    text = { Text(profile.localizedName(strings)) },
                     onClick = {
                         onChange(profile.id)
                         expanded = false
@@ -684,9 +689,10 @@ private fun ThemeModeSelector(
     selectedAccentColor: Int,
     onAccentColorChange: (Int) -> Unit,
 ) {
+    val strings = LocalPulseStrings.current
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         ThemeModeOption(
-            title = "System colors",
+            title = strings.systemColors,
             selected = selected == AppColorSource.SYSTEM,
             onClick = { onChange(AppColorSource.SYSTEM) },
         )
@@ -699,7 +705,7 @@ private fun ThemeModeSelector(
                 onClick = { onChange(AppColorSource.CUSTOM_ACCENT) },
             )
             Text(
-                text = "Custom",
+                text = strings.custom,
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.padding(start = 8.dp),
@@ -776,25 +782,26 @@ private fun TileBehaviorSelector(
     selected: TileInteractionBehavior,
     onChange: (TileInteractionBehavior) -> Unit,
 ) {
+    val strings = LocalPulseStrings.current
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         TileBehaviorOption(
-            title = "Quick settings dialog",
+            title = strings.tileBehaviorDialog,
             selected = selected == TileInteractionBehavior.SHOW_DIALOG,
             onClick = { onChange(TileInteractionBehavior.SHOW_DIALOG) },
             modifier = Modifier.weight(1f),
         )
         TileBehaviorOption(
-            title = "Cycle profiles",
+            title = strings.tileBehaviorCycle,
             selected = selected == TileInteractionBehavior.CYCLE_PROFILES,
             onClick = { onChange(TileInteractionBehavior.CYCLE_PROFILES) },
             modifier = Modifier.weight(1f),
         )
         TileBehaviorOption(
-            title = "Open app",
+            title = strings.tileBehaviorOpenApp,
             selected = selected == TileInteractionBehavior.OPEN_APP,
             onClick = { onChange(TileInteractionBehavior.OPEN_APP) },
             modifier = Modifier.weight(1f),
@@ -837,6 +844,7 @@ private fun ManualRgbControls(
     onTargetChange: (RgbStick) -> Unit,
     onStickChange: (RgbStick, Int, Float) -> Unit,
 ) {
+    val strings = LocalPulseStrings.current
     val target = settings.rgbManualTarget
     // The edited stick's stored color (at full value) + brightness. "Both" edits from the Left values.
     val storedColor = if (target == RgbStick.RIGHT) settings.rgbManualRightColor else settings.rgbManualLeftColor
@@ -857,7 +865,7 @@ private fun ManualRgbControls(
         // Left — stick target + L/R swatches
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(
-                text = "Stick",
+                text = strings.rgbTargetStickLabel,
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
             )
@@ -866,7 +874,7 @@ private fun ManualRgbControls(
                     FilterChip(
                         selected = target == stick,
                         onClick = { onTargetChange(stick) },
-                        label = { Text(stick.label) },
+                        label = { Text(stick.localizedLabel(strings)) },
                     )
                 }
             }
@@ -891,14 +899,14 @@ private fun ManualRgbControls(
             )
             Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
                 Text(
-                    text = "color",
+                    text = strings.rgbColorLabel,
                     modifier = Modifier.weight(17f),
                     textAlign = TextAlign.Center,
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Text(
-                    text = "brightness",
+                    text = strings.rgbBrightnessLabel,
                     modifier = Modifier.weight(12f),
                     textAlign = TextAlign.Center,
                     style = MaterialTheme.typography.labelMedium,
@@ -1069,42 +1077,42 @@ private fun SettingsControlGroup(
 private class OverlayItemGroupDef(val title: String, val items: List<Pair<OverlayElement, String>>)
 
 // Short, in-context labels (the group header carries the "GPU"/"CPU" prefix) covering all 15 OverlayElements.
-private val OverlayItemGroups = listOf(
+private fun getOverlayItemGroups(strings: com.kei.pulse.i18n.PulseStrings) = listOf(
     OverlayItemGroupDef(
-        "Frame rate",
-        listOf(OverlayElement.FPS to "FPS", OverlayElement.FPS_TREND to "Avg · Low · Trend"),
+        strings.overlayGroupFrameRate,
+        listOf(OverlayElement.FPS to "FPS", OverlayElement.FPS_TREND to strings.overlayItemFpsTrend),
     ),
     OverlayItemGroupDef(
-        "GPU",
+        strings.overlayGroupGpu,
         listOf(
-            OverlayElement.GPU_LOAD to "Load",
-            OverlayElement.GPU_CLOCK to "Clock",
-            OverlayElement.GPU_TEMP to "Temp",
+            OverlayElement.GPU_LOAD to strings.overlayItemLoad,
+            OverlayElement.GPU_CLOCK to strings.overlayItemClock,
+            OverlayElement.GPU_TEMP to strings.overlayItemTemp,
         ),
     ),
     OverlayItemGroupDef(
-        "CPU",
+        strings.overlayGroupCpu,
         listOf(
-            OverlayElement.CPU_LOAD to "Load",
-            OverlayElement.CPU_CLOCK to "Clock",
-            OverlayElement.CPU_TEMP to "Temp",
-            OverlayElement.CORE_BARS to "Core bars",
+            OverlayElement.CPU_LOAD to strings.overlayItemLoad,
+            OverlayElement.CPU_CLOCK to strings.overlayItemClock,
+            OverlayElement.CPU_TEMP to strings.overlayItemTemp,
+            OverlayElement.CORE_BARS to strings.overlayItemCoreBars,
         ),
     ),
     OverlayItemGroupDef(
-        "System",
+        strings.overlayGroupSystem,
         listOf(
             OverlayElement.RAM to "RAM",
-            OverlayElement.POWER to "Power",
-            OverlayElement.BATTERY_LEFT to "Time left",
+            OverlayElement.POWER to strings.overlayItemPower,
+            OverlayElement.BATTERY_LEFT to strings.overlayItemTimeLeft,
         ),
     ),
     OverlayItemGroupDef(
-        "Status",
+        strings.overlayGroupStatus,
         listOf(
             OverlayElement.AUTOTDP to "AutoTDP",
-            OverlayElement.SESSION_TIMER to "Timer",
-            OverlayElement.SOC_NAME to "Chip name",
+            OverlayElement.SESSION_TIMER to strings.overlayItemTimer,
+            OverlayElement.SOC_NAME to strings.overlayItemChipName,
         ),
     ),
 )
@@ -1180,6 +1188,7 @@ private fun ThemeSelector(
     selected: PulseThemeId,
     onSelect: (PulseThemeId) -> Unit,
 ) {
+    val strings = LocalPulseStrings.current
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
         PulseThemeId.entries.forEach { theme ->
             Row(
@@ -1193,12 +1202,12 @@ private fun ThemeSelector(
                 RadioButton(selected = selected == theme, onClick = { onSelect(theme) })
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = theme.label,
+                        text = theme.localizedLabel(strings),
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold,
                     )
                     Text(
-                        text = theme.tagline,
+                        text = theme.localizedTagline(strings),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -1207,3 +1216,30 @@ private fun ThemeSelector(
         }
     }
 }
+
+@Composable
+private fun LanguageSelector(
+    selected: AppLanguage,
+    onSelect: (AppLanguage) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        AppLanguage.entries.forEach { lang ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onSelect(lang) }
+                    .padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                RadioButton(selected = selected == lang, onClick = { onSelect(lang) })
+                Text(
+                    text = lang.displayName,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+        }
+    }
+}
+

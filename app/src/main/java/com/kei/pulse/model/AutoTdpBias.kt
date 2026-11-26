@@ -1,5 +1,6 @@
 package com.kei.pulse.model
 
+import com.kei.pulse.i18n.PulseStrings
 import kotlinx.serialization.Serializable
 
 /**
@@ -20,6 +21,18 @@ enum class AutoTdpBias(val label: String) {
     BALANCED("Balanced"),
     SMOOTH("Smooth"),
     ;
+
+    fun localizedLabel(strings: PulseStrings): String = when (this) {
+        EFFICIENT -> strings.autoTdpBiasEfficient
+        BALANCED -> strings.autoTdpBiasBalanced
+        SMOOTH -> strings.autoTdpBiasSmooth
+    }
+
+    fun localizedDesc(strings: PulseStrings): String = when (this) {
+        EFFICIENT -> strings.autoTdpBiasDescEfficient
+        BALANCED -> strings.autoTdpBiasDescBalanced
+        SMOOTH -> strings.autoTdpBiasDescSmooth
+    }
 
     companion object {
         /** Per-app bias wins; a null per-app inherits the [global] default. */

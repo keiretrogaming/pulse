@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.kei.pulse.i18n.AppLanguage
 import com.kei.pulse.model.AppColorSource
 import com.kei.pulse.model.AppSettings
 import com.kei.pulse.model.CustomTuning
@@ -32,6 +33,7 @@ private val Context.settingsDataStore by preferencesDataStore(name = "android_tu
 
 class SettingsStorage(private val context: Context) {
 
+    private val appLanguageKey = stringPreferencesKey("app_language")
     private val tileTapBehaviorKey = stringPreferencesKey("tile_tap_behavior")
     private val pulseEnabledKey = booleanPreferencesKey("pulse_enabled")
     private val applyLastProfileOnBootKey = booleanPreferencesKey("apply_last_profile_on_boot")
@@ -99,6 +101,7 @@ class SettingsStorage(private val context: Context) {
 
     val settings: Flow<AppSettings> = context.settingsDataStore.data.map { preferences ->
         AppSettings(
+            appLanguage = preferences[appLanguageKey]?.let(::parseAppLanguage) ?: AppLanguage.SYSTEM,
             themeId = preferences[themeIdKey]?.let(::parseThemeId) ?: PulseThemeId.SIGNAL,
             colorSource = preferences[colorSourceKey]
                 ?.let(::parseColorSource)
@@ -508,6 +511,15 @@ class SettingsStorage(private val context: Context) {
         return runCatching { AppColorSource.valueOf(raw) }
             .getOrDefault(AppColorSource.SYSTEM)
     }
+
+    suspend fun persistAppLanguage(language: AppLanguage) {
+        context.settingsDataStore.edit { preferences ->
+            preferences[appLanguageKey] = language.name
+        }
+    }
+
+    private fun parseAppLanguage(raw: String): AppLanguage =
+        runCatching { AppLanguage.valueOf(raw) }.getOrDefault(AppLanguage.SYSTEM)
 
     private fun parseOverlayPreset(raw: String): OverlayPreset =
         runCatching { OverlayPreset.valueOf(raw) }.getOrDefault(OverlayPreset.COMPACT)
