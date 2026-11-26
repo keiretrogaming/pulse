@@ -210,6 +210,7 @@ class MainActivity : ComponentActivity() {
                     } else {
                         MainTunerScreen(
                             state = state,
+                            isApplyingProfile = viewModel.isApplyingProfile.collectAsStateWithLifecycle().value,
                             sleepProfileId = settings.sleepProfileId.takeIf { settings.sleepProfileEnabled },
                             onApplyProfile = viewModel::applyProfile,
                             onApplyCurrent = { tunerState ->

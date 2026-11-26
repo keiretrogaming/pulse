@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -25,6 +26,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Edit
@@ -87,6 +89,7 @@ private const val NEW_PROFILE_DIALOG_ID = "__new_profile__"
 @Composable
 fun MainTunerScreen(
     state: TunerState,
+    isApplyingProfile: Boolean = false,
     sleepProfileId: String?,
     onApplyProfile: (PerformanceProfile) -> Unit,
     onApplyCurrent: (TunerState) -> Unit,
@@ -297,6 +300,7 @@ fun MainTunerScreen(
                     PulseSectionLabel("SAVED SETUPS")
                     ProfileListSection(
                         state = state,
+                        isApplyingProfile = isApplyingProfile,
                         sleepProfileId = sleepProfileId,
                         onApplyProfile = onApplyProfile,
                         onOpenCreateProfile = { dialogProfileId = NEW_PROFILE_DIALOG_ID },
@@ -566,19 +570,21 @@ private fun Header(
             }
         }
 
-        state.statusMessage?.let {
-            Text(
-                text = it,
-                color = MaterialTheme.colorScheme.primary,
-                style = MaterialTheme.typography.bodyMedium,
-            )
-        }
-        state.errorMessage?.let {
-            Text(
-                text = it,
-                color = MaterialTheme.colorScheme.error,
-                style = MaterialTheme.typography.bodyMedium,
-            )
+        if (compactMode) {
+            state.statusMessage?.let {
+                Text(
+                    text = it,
+                    color = MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+            state.errorMessage?.let {
+                Text(
+                    text = it,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
         }
     }
 }
@@ -644,6 +650,7 @@ private fun CurrentFrequenciesCard(state: TunerState) {
 @Composable
 private fun ProfileListSection(
     state: TunerState,
+    isApplyingProfile: Boolean,
     sleepProfileId: String?,
     onApplyProfile: (PerformanceProfile) -> Unit,
     onOpenCreateProfile: () -> Unit,
@@ -704,23 +711,40 @@ private fun ProfileListSection(
             }
         }
 
+        val isSelectedAlreadyApplied = state.selectedDisplayProfileId != null &&
+            state.selectedDisplayProfileId == state.activeDisplayProfileId
         val canApplySelectedProfile = state.selectedDisplayProfileId != null &&
+            !isSelectedAlreadyApplied &&
             state.policies.isNotEmpty() &&
             state.isPServerAvailable
         Spacer(Modifier.size(4.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.End,
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(52.dp)
+                .padding(bottom = 4.dp),
+            contentAlignment = Alignment.CenterEnd,
         ) {
-            Button(
-                onClick = onApplySelectedProfile,
-                enabled = canApplySelectedProfile,
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-            ) {
-                Text(
-                    text = state.selectedDisplayProfileName?.let { "Apply $it" }
-                        ?: "Select a profile to apply",
-                )
+            if (!isSelectedAlreadyApplied || isApplyingProfile) {
+                Button(
+                    onClick = onApplySelectedProfile,
+                    enabled = canApplySelectedProfile && !isApplyingProfile,
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                ) {
+                    if (isApplyingProfile) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                        )
+                        Spacer(Modifier.size(8.dp))
+                        Text(text = "Applying…")
+                    } else {
+                        Text(
+                            text = state.selectedDisplayProfileName?.let { "Apply $it" }
+                                ?: "Select a profile to apply",
+                        )
+                    }
+                }
             }
         }
     }
@@ -754,7 +778,6 @@ private fun ProfileListRow(
         else -> colorScheme.onSurface
     }
     val borderColor = when {
-        isApplied -> colorScheme.primary
         isSelected -> colorScheme.primary
         else -> Color.Transparent
     }
@@ -799,6 +822,31 @@ private fun ProfileListRow(
                     fontWeight = FontWeight.SemiBold,
                     color = contentColor,
                 )
+                if (isApplied) {
+                    Surface(
+                        color = colorScheme.primary,
+                        shape = RoundedCornerShape(999.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                            horizontalArrangement = Arrangement.spacedBy(3.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Check,
+                                contentDescription = null,
+                                modifier = Modifier.size(12.dp),
+                                tint = colorScheme.onPrimary,
+                            )
+                            Text(
+                                text = "In Use",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = colorScheme.onPrimary,
+                            )
+                        }
+                    }
+                }
                 if (isSleepProfile) {
                     Icon(
                         imageVector = Icons.Rounded.DarkMode,
@@ -960,15 +1008,26 @@ private fun ProfileSelectorChip(
 ) {
     AssistChip(
         onClick = onClick,
+        leadingIcon = if (isApplied) {
+            {
+                Icon(
+                    imageVector = Icons.Rounded.Check,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                )
+            }
+        } else {
+            null
+        },
         colors = when {
             isApplied -> AssistChipDefaults.assistChipColors(
                 containerColor = MaterialTheme.colorScheme.primaryContainer,
                 labelColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                leadingIconContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
             )
             else -> AssistChipDefaults.assistChipColors()
         },
         border = when {
-            isApplied -> BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
             isSelected -> BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
             else -> null
         },
@@ -1008,7 +1067,7 @@ private fun ProfileEditorDialog(
     onSave: (String, Map<Int, Int>) -> Unit,
     onDelete: () -> Unit,
 ) {
-    val initialValues = remember(profile?.id, creatingNewProfile, manualMode, baseState.actualValues) {
+    val initialValues = remember(profile?.id, creatingNewProfile, manualMode) {
         baseState.policies.associate { policy ->
             val initialValue = when {
                 creatingNewProfile || manualMode -> baseState.actualValues[policy.id]
