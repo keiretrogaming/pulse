@@ -729,8 +729,13 @@ private fun ProfileListSection(
                 enabled = canApplySelectedProfile,
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
             ) {
+                val selectedLabel = if (state.selectedDisplayProfileId == ProfileStateResolver.STOCK_PROFILE_ID) {
+                    strings.powerTierStock
+                } else {
+                    state.selectedDisplayProfileName
+                }
                 Text(
-                    text = state.selectedDisplayProfileName?.let { String.format(strings.applyProfileLabel, it) }
+                    text = selectedLabel?.let { String.format(strings.applyProfileLabel, it) }
                         ?: strings.selectProfilePrompt,
                 )
             }

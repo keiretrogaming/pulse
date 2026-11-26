@@ -157,6 +157,9 @@ class PerformanceTileService : TileService() {
         if (effectiveId == ProfileStateResolver.MANUAL_PROFILE_ID) {
             return getString(R.string.tile_state_manual)
         }
+        if (effectiveId == ProfileStateResolver.STOCK_PROFILE_ID) {
+            return getString(R.string.power_tier_stock)
+        }
         return state.displayProfiles.firstOrNull { it.id == effectiveId }?.name
             ?: state.activeDisplayProfileName
     }
