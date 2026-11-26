@@ -2,6 +2,7 @@ package com.kei.pulse.ui
 
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -19,6 +20,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -642,6 +645,7 @@ private fun CurrentFrequenciesCard(state: TunerState) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ProfileListSection(
     state: TunerState,
@@ -711,10 +715,19 @@ private fun ProfileListSection(
             !isSelectedAlreadyApplied &&
             state.policies.isNotEmpty() &&
             state.isPServerAvailable
+        val applyButtonBringIntoViewRequester = remember { BringIntoViewRequester() }
+        LaunchedEffect(state.selectedDisplayProfileId, isSelectedAlreadyApplied) {
+            if (!isSelectedAlreadyApplied && state.selectedDisplayProfileId != null) {
+                applyButtonBringIntoViewRequester.bringIntoView()
+            }
+        }
         if (!isSelectedAlreadyApplied) {
             Spacer(Modifier.size(4.dp))
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .bringIntoViewRequester(applyButtonBringIntoViewRequester)
+                    .padding(bottom = 4.dp),
                 horizontalArrangement = Arrangement.End,
             ) {
                 Button(
