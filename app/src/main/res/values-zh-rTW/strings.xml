@@ -392,7 +392,7 @@
     <string name="verify_requested">要求</string>
     <string name="verify_actual">實際</string>
     <string name="power_tier_auto_tdp">AutoTDP</string>
-    <string name="power_tier_stock">原廠預設</string>
+    <string name="power_tier_stock">原廠設定</string>
     <string name="governor_performance">效能</string>
     <string name="governor_balanced">平衡</string>
     <string name="governor_power_save">省電</string>
