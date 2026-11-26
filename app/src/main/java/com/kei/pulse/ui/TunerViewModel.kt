@@ -1042,7 +1042,7 @@ class TunerViewModel(
                     buildVerificationFailureMessage(state, outcome.actualValues, outcome.commandOutput)
                 }
                 transientError.value = null
-                withTimeoutOrNull(800) {
+                withTimeoutOrNull(300) {
                     latestRepoValues.first { repoValues ->
                         appliedValues.all { (policyId, value) -> repoValues[policyId] == value }
                     }

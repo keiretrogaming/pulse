@@ -60,6 +60,9 @@ class PerformanceRepository(
     )
 
     private val liveRefreshToken = MutableStateFlow(0)
+    private val cachedLiveValues = MutableStateFlow<Map<Int, Int>?>(null)
+    @Volatile
+    private var lastLiveReadToken = -1
 
     @OptIn(ExperimentalCoroutinesApi::class)
     fun observeState(): Flow<TunerState> {
@@ -93,15 +96,23 @@ class PerformanceRepository(
         return combine(
             liveRefreshToken,
             completeStorageState,
-        ) { _, storage -> storage }
-            .transformLatest { storage ->
+        ) { token, storage -> token to storage }
+            .transformLatest { (token, storage) ->
                 val cachedPolicies = processCachedPolicies
                 val policies = if (cachedPolicies.isEmpty()) {
                     detector.detectPolicies().also { detectedPolicies ->
                         processCachedPolicies = detectedPolicies
+                        lastLiveReadToken = token
                     }
                 } else {
-                    val liveValues = detector.readCurrentMaxValues(cachedPolicies)
+                    val liveValues = if (token != lastLiveReadToken || cachedLiveValues.value == null) {
+                        detector.readCurrentMaxValues(cachedPolicies).also { values ->
+                            cachedLiveValues.value = values
+                            lastLiveReadToken = token
+                        }
+                    } else {
+                        cachedLiveValues.value.orEmpty()
+                    }
                     cachedPolicies.map { policy ->
                         policy.copy(currentMaxFreq = liveValues[policy.id] ?: policy.currentMaxFreq)
                     }
@@ -380,7 +391,7 @@ class PerformanceRepository(
                 profileStorage.persistCustomValues(filtered)
             }
             val actualValues = detector.readCurrentMaxValues(policies)
-            refreshLiveValues()
+            cachedLiveValues.value = actualValues
             ApplyOutcome(
                 actualValues = actualValues,
                 verificationPassed = filtered.all { (policyId, requestedValue) ->
