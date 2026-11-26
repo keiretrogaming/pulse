@@ -1,7 +1,9 @@
 package com.kei.pulse.data
 
 import android.content.Context
+import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -10,7 +12,10 @@ import com.kei.pulse.model.ProfileSource
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
-private val Context.dataStore by preferencesDataStore(name = "android_tuner")
+private val Context.dataStore by preferencesDataStore(
+    name = "android_tuner",
+    corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() },
+)
 
 class ProfileStorage(private val context: Context) {
 

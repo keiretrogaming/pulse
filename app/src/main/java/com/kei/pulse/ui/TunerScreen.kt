@@ -25,6 +25,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Edit
@@ -704,23 +705,28 @@ private fun ProfileListSection(
             }
         }
 
+        val isSelectedAlreadyApplied = state.selectedDisplayProfileId != null &&
+            state.selectedDisplayProfileId == state.activeDisplayProfileId
         val canApplySelectedProfile = state.selectedDisplayProfileId != null &&
+            !isSelectedAlreadyApplied &&
             state.policies.isNotEmpty() &&
             state.isPServerAvailable
-        Spacer(Modifier.size(4.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.End,
-        ) {
-            Button(
-                onClick = onApplySelectedProfile,
-                enabled = canApplySelectedProfile,
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+        if (!isSelectedAlreadyApplied) {
+            Spacer(Modifier.size(4.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
             ) {
-                Text(
-                    text = state.selectedDisplayProfileName?.let { "Apply $it" }
-                        ?: "Select a profile to apply",
-                )
+                Button(
+                    onClick = onApplySelectedProfile,
+                    enabled = canApplySelectedProfile,
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                ) {
+                    Text(
+                        text = state.selectedDisplayProfileName?.let { "Apply $it" }
+                            ?: "Select a profile to apply",
+                    )
+                }
             }
         }
     }
@@ -754,7 +760,6 @@ private fun ProfileListRow(
         else -> colorScheme.onSurface
     }
     val borderColor = when {
-        isApplied -> colorScheme.primary
         isSelected -> colorScheme.primary
         else -> Color.Transparent
     }
@@ -799,6 +804,31 @@ private fun ProfileListRow(
                     fontWeight = FontWeight.SemiBold,
                     color = contentColor,
                 )
+                if (isApplied) {
+                    Surface(
+                        color = colorScheme.primary,
+                        shape = RoundedCornerShape(999.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                            horizontalArrangement = Arrangement.spacedBy(3.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Check,
+                                contentDescription = null,
+                                modifier = Modifier.size(12.dp),
+                                tint = colorScheme.onPrimary,
+                            )
+                            Text(
+                                text = "In Use",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = colorScheme.onPrimary,
+                            )
+                        }
+                    }
+                }
                 if (isSleepProfile) {
                     Icon(
                         imageVector = Icons.Rounded.DarkMode,
@@ -960,15 +990,26 @@ private fun ProfileSelectorChip(
 ) {
     AssistChip(
         onClick = onClick,
+        leadingIcon = if (isApplied) {
+            {
+                Icon(
+                    imageVector = Icons.Rounded.Check,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                )
+            }
+        } else {
+            null
+        },
         colors = when {
             isApplied -> AssistChipDefaults.assistChipColors(
                 containerColor = MaterialTheme.colorScheme.primaryContainer,
                 labelColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                leadingIconContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
             )
             else -> AssistChipDefaults.assistChipColors()
         },
         border = when {
-            isApplied -> BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
             isSelected -> BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
             else -> null
         },

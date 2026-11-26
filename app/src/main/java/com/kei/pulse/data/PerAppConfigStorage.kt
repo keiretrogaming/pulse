@@ -1,8 +1,10 @@
 package com.kei.pulse.data
 
 import android.content.Context
+import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -13,7 +15,10 @@ import kotlinx.coroutines.flow.map
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
-private val Context.perAppDataStore by preferencesDataStore(name = "pulse_per_app")
+private val Context.perAppDataStore by preferencesDataStore(
+    name = "pulse_per_app",
+    corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() },
+)
 
 class PerAppConfigStorage(private val context: Context) {
 
