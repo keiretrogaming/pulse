@@ -145,7 +145,7 @@
     <string name="tier_max_tagline">解放晶片最高時脈上限</string>
     <string name="tier_balanced_label">平衡模式 (Balanced)</string>
     <string name="tier_balanced_tagline">兼顧發熱與效能，適合長時遊玩</string>
-    <string name="tier_power_saving_label">省電模式 (Power Saving)</string>
+    <string name="tier_power_saving_label">省電模式</string>
     <string name="tier_power_saving_tagline">大幅降低時脈，最大化續航時間</string>
     <string name="tier_custom_label">自訂模式 (Custom)</string>
     <string name="tier_custom_tagline">完全由您自訂各項頻率與風扇曲線</string>
@@ -213,7 +213,7 @@
     <string name="resolution_label">渲染解析度</string>
     <string name="resolution_native">原生</string>
     <string name="refresh_rate_label">螢幕更新率</string>
-    <string name="power_target_title">功耗目標 (Power Target)</string>
+    <string name="power_target_title">功耗目標</string>
     <string name="power_target_cpu_only">僅限 CPU</string>
     <string name="power_target_desc_all">同時按比例統一縮放所有 CPU 與 GPU 頻率上限。開啟此功能時，下方個別滑桿將自動鎖定。</string>
     <string name="power_target_desc_cpu_only">僅縮放 CPU 核心頻率 — GPU 維持自身的頻率滑桿與下限設定。</string>
@@ -223,7 +223,7 @@
     <string name="auto_tdp_desc_on">即時自動調節 CPU 與 GPU 時脈，以最低功耗維持目標幀率。若有自訂風扇則持續使用自訂風扇（串聯），否則使用智慧風扇。開啟時手動檔位控制將鎖定，個別遊戲自訂優先權高於此。</string>
     <string name="auto_tdp_desc_off">即時自動調節 CPU 與 GPU 時脈以最低功耗達成目標幀率 — 涵蓋遊戲、模擬器與媒體播放。固定於最高更新率，並在退出遊戲或返回主畫面時自動釋放。</string>
     <string name="auto_tdp_fps_target">預設目標幀率</string>
-    <string name="auto_tdp_aggressive_park">激進核心休眠 (Aggressive Park)</string>
+    <string name="auto_tdp_aggressive_park">激進核心休眠</string>
     <string name="auto_tdp_aggressive_park_desc">在重負載模擬器等場景下，當超大核非效能瓶頸時將其休眠以大幅省電，一旦幀率下跌即時喚醒。</string>
     <string name="auto_tdp_efficiency_title">效率傾向 (Efficiency)</string>
     <string name="auto_tdp_bias_label">功耗傾向</string>
@@ -393,4 +393,7 @@
     <string name="verify_actual">實際</string>
     <string name="power_tier_auto_tdp">AutoTDP</string>
     <string name="power_tier_stock">原廠預設</string>
+    <string name="governor_performance">效能</string>
+    <string name="governor_balanced">平衡</string>
+    <string name="governor_power_save">省電</string>
 </resources>

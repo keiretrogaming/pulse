@@ -393,5 +393,8 @@
     <string name="verify_requested">requested</string>
     <string name="verify_actual">actual</string>
     <string name="power_tier_auto_tdp">AutoTDP</string>
+    <string name="governor_performance">Performance</string>
+    <string name="governor_balanced">Balanced</string>
+    <string name="governor_power_save">Power Save</string>
     <string name="power_tier_stock">Stock</string>
 </resources>

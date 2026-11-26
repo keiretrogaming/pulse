@@ -788,6 +788,13 @@ private fun TelemetryMetric(
     }
 }
 
+fun GovernorOption.localizedLabel(strings: com.kei.pulse.i18n.PulseStrings): String = when (label) {
+    "Performance" -> strings.governorPerformance
+    "Balanced" -> strings.governorBalanced
+    "Power Save" -> strings.governorPowerSave
+    else -> label
+}
+
 /** CPU governor selector (#4). */
 @Composable
 fun GovernorModule(current: String?, onSelect: (GovernorOption) -> Unit, modifier: Modifier = Modifier) {
@@ -801,7 +808,7 @@ fun GovernorModule(current: String?, onSelect: (GovernorOption) -> Unit, modifie
         ) {
             GovernorController.OPTIONS.forEach { opt ->
                 PulseChip(
-                    label = opt.label,
+                    label = opt.localizedLabel(strings),
                     selected = activeOption == opt,
                     accent = MaterialTheme.colorScheme.primary,
                     onClick = { onSelect(opt) },

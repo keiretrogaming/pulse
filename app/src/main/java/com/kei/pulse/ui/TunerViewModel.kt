@@ -615,7 +615,7 @@ class TunerViewModel(
             if (chosen != null && _activeTier.value == PowerTier.CUSTOM) persistTuning()
             val strings = currentStrings()
             transientMessage.value =
-                if (chosen != null) String.format(strings.toastGovernorSet, option.label) else strings.toastGovernorFailed
+                if (chosen != null) String.format(strings.toastGovernorSet, option.localizedLabel(strings)) else strings.toastGovernorFailed
             transientError.value = null
         }
     }

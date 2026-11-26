@@ -176,6 +176,9 @@ interface PulseStrings {
     val cpuSectionTitle: String
     val cpuPoliciesLabel: String
     val cpuGovernorLabel: String
+    val governorPerformance: String
+    val governorBalanced: String
+    val governorPowerSave: String
     val cpuFloorLabel: String
     val cpuFloorDesc: String
     val primeBoostLabel: String
@@ -398,3 +401,6 @@ interface PulseStrings {
     val powerTierAutoTdp: String
     val powerTierStock: String
 }
+
+fun com.kei.pulse.model.PerformanceProfile.localizedName(strings: PulseStrings): String =
+    if (id == com.kei.pulse.model.ProfileStateResolver.STOCK_PROFILE_ID) strings.powerTierStock else name

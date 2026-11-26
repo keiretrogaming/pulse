@@ -65,6 +65,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.kei.pulse.i18n.AppLanguage
 import com.kei.pulse.i18n.LocalPulseStrings
+import com.kei.pulse.i18n.localizedName
 import com.kei.pulse.model.AppColorSource
 import com.kei.pulse.model.OverlayElement
 import com.kei.pulse.model.OverlayPreset
@@ -651,7 +652,7 @@ private fun SleepProfileSelector(
         onExpandedChange = { if (enabled) expanded = !expanded },
     ) {
         OutlinedTextField(
-            value = selectedProfile?.name ?: strings.selectProfile,
+            value = selectedProfile?.localizedName(strings) ?: strings.selectProfile,
             onValueChange = {},
             readOnly = true,
             enabled = enabled,
@@ -670,7 +671,7 @@ private fun SleepProfileSelector(
         ) {
             profiles.forEach { profile ->
                 DropdownMenuItem(
-                    text = { Text(profile.name) },
+                    text = { Text(profile.localizedName(strings)) },
                     onClick = {
                         onChange(profile.id)
                         expanded = false

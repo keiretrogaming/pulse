@@ -48,6 +48,7 @@ import com.kei.pulse.model.PowerTier
 import com.kei.pulse.model.ProfileSource
 import com.kei.pulse.model.ProfileStateResolver
 import com.kei.pulse.i18n.LocalPulseStrings
+import com.kei.pulse.i18n.localizedName
 import com.kei.pulse.i18n.PulseStrings
 import com.kei.pulse.ui.theme.HudBackground
 import kotlinx.coroutines.Dispatchers
@@ -378,7 +379,7 @@ private fun PerAppConfigDialog(
                     profiles
                         .filter { it.source != ProfileSource.VIRTUAL || it.id == ProfileStateResolver.STOCK_PROFILE_ID }
                         .forEach { profile ->
-                            val label = if (profile.id == ProfileStateResolver.STOCK_PROFILE_ID) strings.powerTierStock else profile.name
+                            val label = profile.localizedName(strings)
                             DialogChip(label, profileBinding == profile.id) {
                                 profileBinding = profile.id
                             }

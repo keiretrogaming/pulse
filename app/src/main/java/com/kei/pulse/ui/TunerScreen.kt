@@ -76,6 +76,7 @@ import com.kei.pulse.model.AutoTdpBias
 import com.kei.pulse.model.PowerTier
 import com.kei.pulse.ui.theme.HudBackground
 import com.kei.pulse.i18n.LocalPulseStrings
+import com.kei.pulse.i18n.localizedName
 import com.kei.pulse.i18n.PulseStrings
 import com.kei.pulse.model.CpuPolicyInfo
 import com.kei.pulse.model.PerformanceProfile
@@ -778,6 +779,7 @@ private fun ProfileListRow(
         else -> colorScheme.onPrimaryContainer
     }
 
+    val strings = LocalPulseStrings.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -805,7 +807,7 @@ private fun ProfileListRow(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = profile.name,
+                    text = profile.localizedName(strings),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     color = contentColor,
@@ -917,6 +919,7 @@ private fun ProfileChipSelector(
     onClearSelection: () -> Unit,
     onOpenFullApp: (() -> Unit)?,
 ) {
+    val strings = LocalPulseStrings.current
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -928,7 +931,7 @@ private fun ProfileChipSelector(
         ) {
             state.displayProfiles.forEach { profile ->
                 ProfileSelectorChip(
-                    label = profile.name,
+                    label = profile.localizedName(strings),
                     isApplied = profile.id == state.activeDisplayProfileId,
                     isSelected = profile.id == state.selectedDisplayProfileId,
                     onClick = { onApplyProfile(profile) },
