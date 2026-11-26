@@ -1008,7 +1008,7 @@ private fun ProfileEditorDialog(
     onSave: (String, Map<Int, Int>) -> Unit,
     onDelete: () -> Unit,
 ) {
-    val initialValues = remember(profile?.id, creatingNewProfile, manualMode, baseState.actualValues) {
+    val initialValues = remember(profile?.id, creatingNewProfile, manualMode) {
         baseState.policies.associate { policy ->
             val initialValue = when {
                 creatingNewProfile || manualMode -> baseState.actualValues[policy.id]
