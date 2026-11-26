@@ -2,7 +2,6 @@ package com.kei.pulse.ui
 
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -15,13 +14,12 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.relocation.BringIntoViewRequester
-import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -64,7 +62,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.LocalContext
@@ -92,6 +89,7 @@ private const val NEW_PROFILE_DIALOG_ID = "__new_profile__"
 @Composable
 fun MainTunerScreen(
     state: TunerState,
+    isApplyingProfile: Boolean = false,
     sleepProfileId: String?,
     onApplyProfile: (PerformanceProfile) -> Unit,
     onApplyCurrent: (TunerState) -> Unit,
@@ -302,6 +300,7 @@ fun MainTunerScreen(
                     PulseSectionLabel("SAVED SETUPS")
                     ProfileListSection(
                         state = state,
+                        isApplyingProfile = isApplyingProfile,
                         sleepProfileId = sleepProfileId,
                         onApplyProfile = onApplyProfile,
                         onOpenCreateProfile = { dialogProfileId = NEW_PROFILE_DIALOG_ID },
@@ -571,19 +570,21 @@ private fun Header(
             }
         }
 
-        state.statusMessage?.let {
-            Text(
-                text = it,
-                color = MaterialTheme.colorScheme.primary,
-                style = MaterialTheme.typography.bodyMedium,
-            )
-        }
-        state.errorMessage?.let {
-            Text(
-                text = it,
-                color = MaterialTheme.colorScheme.error,
-                style = MaterialTheme.typography.bodyMedium,
-            )
+        if (compactMode) {
+            state.statusMessage?.let {
+                Text(
+                    text = it,
+                    color = MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+            state.errorMessage?.let {
+                Text(
+                    text = it,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
         }
     }
 }
@@ -646,10 +647,10 @@ private fun CurrentFrequenciesCard(state: TunerState) {
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ProfileListSection(
     state: TunerState,
+    isApplyingProfile: Boolean,
     sleepProfileId: String?,
     onApplyProfile: (PerformanceProfile) -> Unit,
     onOpenCreateProfile: () -> Unit,
@@ -716,30 +717,34 @@ private fun ProfileListSection(
             !isSelectedAlreadyApplied &&
             state.policies.isNotEmpty() &&
             state.isPServerAvailable
-        val applyButtonBringIntoViewRequester = remember { BringIntoViewRequester() }
-        LaunchedEffect(state.selectedDisplayProfileId, isSelectedAlreadyApplied) {
-            if (!isSelectedAlreadyApplied && state.selectedDisplayProfileId != null) {
-                applyButtonBringIntoViewRequester.bringIntoView()
-            }
-        }
         Spacer(Modifier.size(4.dp))
-        Row(
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .bringIntoViewRequester(applyButtonBringIntoViewRequester)
-                .padding(bottom = 4.dp)
-                .alpha(if (isSelectedAlreadyApplied) 0f else 1f),
-            horizontalArrangement = Arrangement.End,
+                .height(52.dp)
+                .padding(bottom = 4.dp),
+            contentAlignment = Alignment.CenterEnd,
         ) {
-            Button(
-                onClick = { if (!isSelectedAlreadyApplied) onApplySelectedProfile() },
-                enabled = canApplySelectedProfile,
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-            ) {
-                Text(
-                    text = state.selectedDisplayProfileName?.let { "Apply $it" }
-                        ?: "Select a profile to apply",
-                )
+            if (!isSelectedAlreadyApplied || isApplyingProfile) {
+                Button(
+                    onClick = onApplySelectedProfile,
+                    enabled = canApplySelectedProfile && !isApplyingProfile,
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                ) {
+                    if (isApplyingProfile) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                        )
+                        Spacer(Modifier.size(8.dp))
+                        Text(text = "Applying…")
+                    } else {
+                        Text(
+                            text = state.selectedDisplayProfileName?.let { "Apply $it" }
+                                ?: "Select a profile to apply",
+                        )
+                    }
+                }
             }
         }
     }

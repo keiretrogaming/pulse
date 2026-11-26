@@ -58,6 +58,8 @@ class TunerViewModel(
 
     private val edits = MutableStateFlow<Map<Int, Int>>(emptyMap())
     private val latestRepoValues = MutableStateFlow<Map<Int, Int>>(emptyMap())
+    private val _isApplyingProfile = MutableStateFlow(false)
+    val isApplyingProfile: StateFlow<Boolean> = _isApplyingProfile
     private val transientMessage = MutableStateFlow<String?>(null)
     private val transientError = MutableStateFlow<String?>(null)
 
@@ -1024,39 +1026,44 @@ class TunerViewModel(
         transientError.value = null
 
         viewModelScope.launch {
-            val appliedProfile = ProfileStateResolver.preferredProfileForCurrentValues(state)
-            val appliedValues = state.currentValues.filterKeys { id -> state.policies.any { it.id == id } }
-            val editsSnapshot = edits.value
-            val applyResult = repository.applyValues(
-                policies = state.policies,
-                selectedValues = state.currentValues,
-                isReset = appliedProfile?.id == ProfileStateResolver.STOCK_PROFILE_ID,
-                appliedDisplayProfileId = appliedProfile?.id ?: ProfileStateResolver.MANUAL_PROFILE_ID,
-                // A pure manual apply (no profile matched) is the user's Custom setup — snapshot it.
-                persistAsCustom = appliedProfile == null,
-            )
-            applyResult.onSuccess { outcome ->
-                transientMessage.value = if (outcome.verificationPassed) {
-                    buildAppliedMessage(appliedProfile, outcome.commandOutput)
-                } else {
-                    buildVerificationFailureMessage(state, outcome.actualValues, outcome.commandOutput)
-                }
-                transientError.value = null
-                withTimeoutOrNull(300) {
-                    latestRepoValues.first { repoValues ->
-                        appliedValues.all { (policyId, value) -> repoValues[policyId] == value }
+            _isApplyingProfile.value = true
+            try {
+                val appliedProfile = ProfileStateResolver.preferredProfileForCurrentValues(state)
+                val appliedValues = state.currentValues.filterKeys { id -> state.policies.any { it.id == id } }
+                val editsSnapshot = edits.value
+                val applyResult = repository.applyValues(
+                    policies = state.policies,
+                    selectedValues = state.currentValues,
+                    isReset = appliedProfile?.id == ProfileStateResolver.STOCK_PROFILE_ID,
+                    appliedDisplayProfileId = appliedProfile?.id ?: ProfileStateResolver.MANUAL_PROFILE_ID,
+                    // A pure manual apply (no profile matched) is the user's Custom setup — snapshot it.
+                    persistAsCustom = appliedProfile == null,
+                )
+                applyResult.onSuccess { outcome ->
+                    transientMessage.value = if (outcome.verificationPassed) {
+                        buildAppliedMessage(appliedProfile, outcome.commandOutput)
+                    } else {
+                        buildVerificationFailureMessage(state, outcome.actualValues, outcome.commandOutput)
                     }
+                    transientError.value = null
+                    withTimeoutOrNull(300) {
+                        latestRepoValues.first { repoValues ->
+                            appliedValues.all { (policyId, value) -> repoValues[policyId] == value }
+                        }
+                    }
+                    if (edits.value == editsSnapshot) {
+                        edits.value = emptyMap()
+                    }
+                }.onFailure { throwable ->
+                    transientError.value = throwable.message ?: "Failed to apply limits"
                 }
-                if (edits.value == editsSnapshot) {
-                    edits.value = emptyMap()
+                if (applyResult.isSuccess) {
+                    reapplyGpuLock()
+                    repository.selectProfile(appliedProfile?.id?.takeUnless { it == ProfileStateResolver.STOCK_PROFILE_ID })
+                    onApplied(appliedProfile?.name ?: "Manual")
                 }
-            }.onFailure { throwable ->
-                transientError.value = throwable.message ?: "Failed to apply limits"
-            }
-            if (applyResult.isSuccess) {
-                reapplyGpuLock()
-                repository.selectProfile(appliedProfile?.id?.takeUnless { it == ProfileStateResolver.STOCK_PROFILE_ID })
-                onApplied(appliedProfile?.name ?: "Manual")
+            } finally {
+                _isApplyingProfile.value = false
             }
         }
     }
